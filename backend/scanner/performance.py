@@ -1,3 +1,4 @@
+import os
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
@@ -56,9 +57,20 @@ async def analyze_performance(url: str) -> dict:
         async with async_playwright() as p:
 
             # Use locally installed Google Chrome.
+            browser_channel = os.getenv(
+                "BROWSER_CHANNEL",
+                "",
+            ).strip()
+
+            launch_options = {
+                "headless": True,
+            }
+
+            if browser_channel:
+                launch_options["channel"] = browser_channel
+
             browser = await p.chromium.launch(
-                channel="chrome",
-                headless=True,
+                **launch_options
             )
 
             context = await browser.new_context(

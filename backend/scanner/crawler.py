@@ -1,3 +1,4 @@
+import os
 import asyncio
 import ipaddress
 import socket
@@ -294,9 +295,20 @@ async def scan_website(url: str) -> dict:
 
         async with async_playwright() as p:
 
+            browser_channel = os.getenv(
+                "BROWSER_CHANNEL",
+                "",
+            ).strip()
+
+            launch_options = {
+                "headless": True,
+            }
+
+            if browser_channel:
+                launch_options["channel"] = browser_channel
+
             browser = await p.chromium.launch(
-                channel="chrome",
-                headless=True,
+                **launch_options
             )
 
             context = await browser.new_context(

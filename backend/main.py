@@ -42,6 +42,11 @@ from services.stripe_service import (
     verify_paid_session,
 )
 
+from database.db import init_db
+
+
+init_db()
+
 
 app = FastAPI(
     title="Revenue Leak Scanner API",
