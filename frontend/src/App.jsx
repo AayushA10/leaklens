@@ -19,6 +19,7 @@ import {
   Download,
 } from "lucide-react";
 import "./App.css";
+import LegalPage from "./LegalPage";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ||
@@ -26,6 +27,19 @@ const API_BASE_URL = (
 ).replace(/\/$/, "");
 
 function App() {
+  const legalPages = ["privacy", "terms", "refund", "contact"];
+  const currentPath = window.location.pathname
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+
+  const activeLegalPage = legalPages.includes(currentPath)
+    ? currentPath
+    : null;
+
+  const goHome = () => {
+    window.location.href = "/";
+  };
+
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -485,6 +499,17 @@ function App() {
 
     return `${Math.max(0, Math.min(100, score))}%`;
   };
+
+  if (activeLegalPage) {
+    return (
+      <div className="app">
+        <LegalPage
+          page={activeLegalPage}
+          onHome={goHome}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -1946,6 +1971,26 @@ function App() {
           </section>
         )}
       </main>
+
+      <footer className="site-footer">
+        <div className="site-footer-inner">
+          <div className="footer-brand">
+            <strong>LeakLens</strong>
+            <span>Find the website issues costing you revenue.</span>
+          </div>
+
+          <nav className="footer-links" aria-label="Legal and support links">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <a href="/refund">Refund</a>
+            <a href="/contact">Contact</a>
+          </nav>
+
+          <div className="footer-meta">
+            © {new Date().getFullYear()} LeakLens. All rights reserved.
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

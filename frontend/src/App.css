@@ -2007,3 +2007,241 @@ html {
     text-align: left;
   }
 }
+
+/* =================================
+   CONTACT
+   ================================= */
+
+.legal-contact-section {
+  padding: 40px 24px 80px;
+}
+
+.legal-contact-card {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px;
+  border: 1px solid rgba(72, 224, 169, 0.18);
+  border-radius: 24px;
+  background: rgba(10, 35, 29, 0.72);
+}
+
+.legal-contact-card h2 {
+  margin: 10px 0 14px;
+  font-size: clamp(28px, 4vw, 42px);
+}
+
+.legal-contact-card p {
+  margin: 0;
+  max-width: 760px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.legal-contact-card a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.legal-contact-card a:hover {
+  text-decoration: underline;
+}
+
+/* =================================
+   LEGAL PAGES
+   ================================= */
+
+.legal-page-section {
+  padding: 24px 24px 0;
+}
+
+.legal-page-card {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px;
+  border: 1px solid rgba(72, 224, 169, 0.14);
+  border-radius: 24px;
+  background: rgba(10, 35, 29, 0.52);
+}
+
+.legal-page-card h2 {
+  margin: 10px 0 18px;
+  font-size: clamp(28px, 4vw, 42px);
+}
+
+.legal-page-card p {
+  max-width: 860px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.legal-page-card p:last-child {
+  margin-bottom: 0;
+}
+
+.legal-page-card a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.legal-page-card a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 700px) {
+  .legal-page-section,
+  .legal-contact-section {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .legal-page-card,
+  .legal-contact-card {
+    padding: 24px 20px;
+    border-radius: 20px;
+  }
+}
+
+/* =================================
+   FOOTER
+   ================================= */
+
+.site-footer {
+  padding: 0 24px 32px;
+}
+
+.site-footer-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px 32px;
+  align-items: center;
+}
+
+.footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.footer-brand strong {
+  font-size: 18px;
+}
+
+.footer-brand span,
+.footer-meta {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  justify-content: flex-end;
+}
+
+.footer-links a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.footer-links a:hover {
+  color: var(--accent);
+}
+
+.footer-meta {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .site-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .site-footer-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .footer-links {
+    justify-content: flex-start;
+    gap: 14px 18px;
+  }
+
+  .footer-meta {
+    grid-column: auto;
+  }
+}
+
+/* Dedicated legal page */
+.legal-page-shell {
+  min-height: 100vh;
+  padding-top: 32px;
+}
+
+.standalone-legal-page {
+  padding-top: 0;
+}
+
+.standalone-legal-page .legal-page-card {
+  padding: 40px;
+}
+
+.standalone-legal-page .section-label {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.standalone-legal-page h1 {
+  margin: 0 0 26px;
+  font-size: clamp(32px, 4vw, 46px);
+  line-height: 1.1;
+}
+
+.legal-back-button {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 32px;
+  padding: 10px 16px;
+  border: 1px solid rgba(72, 224, 169, 0.3);
+  border-radius: 10px;
+  background: rgba(72, 224, 169, 0.08);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.legal-back-button:hover {
+  background: rgba(72, 224, 169, 0.14);
+  border-color: rgba(72, 224, 169, 0.55);
+  transform: translateX(-2px);
+}
+
+@media (max-width: 700px) {
+  .legal-page-shell {
+    padding-top: 20px;
+  }
+
+  .standalone-legal-page .legal-page-card {
+    padding: 28px 22px;
+  }
+
+  .legal-back-button {
+    margin-bottom: 26px;
+  }
+}
