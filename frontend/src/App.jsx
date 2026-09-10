@@ -20,6 +20,11 @@ import {
 } from "lucide-react";
 import "./App.css";
 
+const API_BASE_URL = (
+  import.meta.env.VITE_API_URL ||
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
 function App() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,7 +68,7 @@ function App() {
       const normalizedUrl = normalizeUrl(url);
 
       const response = await fetch(
-        `http://127.0.0.1:8000/scan?url=${encodeURIComponent(
+        `${API_BASE_URL}/scan?url=${encodeURIComponent(
           normalizedUrl
         )}`
       );
@@ -111,7 +116,7 @@ function App() {
 
   const loadPaidReport = async (reportId) => {
     const response = await fetch(
-      `http://127.0.0.1:8000/report/${reportId}`
+      `${API_BASE_URL}/report/${reportId}`
     );
 
     if (!response.ok) {
@@ -144,7 +149,7 @@ function App() {
 
     if (!unlockedReport.ai_analysis) {
       const aiResponse = await fetch(
-        `http://127.0.0.1:8000/report/${reportId}/generate-ai`,
+        `${API_BASE_URL}/report/${reportId}/generate-ai`,
         {
           method: "POST",
         }
@@ -192,7 +197,7 @@ function App() {
     cancelled = false
   ) => {
     const response = await fetch(
-      `http://127.0.0.1:8000/report/${reportId}/preview`
+      `${API_BASE_URL}/report/${reportId}/preview`
     );
 
     if (!response.ok) {
@@ -230,7 +235,7 @@ function App() {
       setUnlockError("");
 
       fetch(
-        `http://127.0.0.1:8000/payments/confirm?session_id=${encodeURIComponent(
+        `${API_BASE_URL}/payments/confirm?session_id=${encodeURIComponent(
           sessionId
         )}`,
         {
@@ -310,7 +315,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/report/${result.report_id}/checkout`,
+        `${API_BASE_URL}/report/${result.report_id}/checkout`,
         {
           method: "POST",
         }
@@ -360,7 +365,7 @@ function App() {
     setDownloadingPdf(true);
 
     window.location.href =
-      `http://127.0.0.1:8000/report/${result.report_id}/pdf`;
+      `${API_BASE_URL}/report/${result.report_id}/pdf`;
 
     window.setTimeout(
       () => {
