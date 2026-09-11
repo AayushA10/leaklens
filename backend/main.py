@@ -304,9 +304,8 @@ async def scan(
         description="Website URL to scan",
     ),
 ):
-    website_data, performance_result = await asyncio.gather(
-        scan_website(url),
-        analyze_performance(url),
+    website_data = await scan_website(
+        url
     )
 
     if not website_data.get(
@@ -319,6 +318,10 @@ async def scan(
                 "Unable to scan website.",
             ),
         }
+
+    performance_result = await analyze_performance(
+        website_data.get("final_url") or url
+    )
 
     seo_result = analyze_seo(
         website_data
