@@ -195,8 +195,8 @@ async def analyze_performance(url: str) -> dict:
 
             response = await page.goto(
                 url,
-                wait_until="load",
-                timeout=45000,
+                wait_until="domcontentloaded",
+                timeout=20000,
             )
 
             if response is None:
@@ -264,6 +264,14 @@ async def analyze_performance(url: str) -> dict:
                 )
             )
 
+            if load_time <= 0:
+                load_time = round(
+                    timing.get(
+                        "domContentLoaded",
+                        0,
+                    )
+                )
+
             dom_content_loaded = round(
                 timing.get(
                     "domContentLoaded",
@@ -330,6 +338,10 @@ async def analyze_performance(url: str) -> dict:
             # CLEAN BROWSER SHUTDOWN
             # =================================
 
+            await context.unroute_all(
+                behavior="ignoreErrors"
+            )
+
             await context.close()
             context = None
 
@@ -351,6 +363,9 @@ async def analyze_performance(url: str) -> dict:
 
         if context:
             try:
+                await context.unroute_all(
+                    behavior="ignoreErrors"
+                )
                 await context.close()
             except Exception:
                 pass
@@ -380,6 +395,9 @@ async def analyze_performance(url: str) -> dict:
 
         if context:
             try:
+                await context.unroute_all(
+                    behavior="ignoreErrors"
+                )
                 await context.close()
             except Exception:
                 pass

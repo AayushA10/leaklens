@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import asyncio
 
 from dotenv import load_dotenv
 
@@ -303,8 +304,9 @@ async def scan(
         description="Website URL to scan",
     ),
 ):
-    website_data = await scan_website(
-        url
+    website_data, performance_result = await asyncio.gather(
+        scan_website(url),
+        analyze_performance(url),
     )
 
     if not website_data.get(
@@ -326,12 +328,6 @@ async def scan(
         website_data
     )
 
-    performance_result = await analyze_performance(
-        website_data.get(
-            "final_url"
-        )
-        or url
-    )
 
     revenue_leak_result = (
         calculate_revenue_leak_score(

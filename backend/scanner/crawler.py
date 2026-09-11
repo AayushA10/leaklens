@@ -327,6 +327,19 @@ async def scan_website(url: str) -> dict:
                 request,
             ):
                 request_url = request.url
+
+                # The crawler only needs page structure/content.
+                # Skip heavy visual resources to speed up scans.
+                if request.resource_type in {
+                    "image",
+                    "font",
+                    "media",
+                }:
+                    await route.abort(
+                        "blockedbyclient"
+                    )
+                    return
+
                 parsed_request = urlparse(
                     request_url
                 )
@@ -369,7 +382,7 @@ async def scan_website(url: str) -> dict:
 
             # Give dynamic content a short opportunity to render.
             await page.wait_for_timeout(
-                1500
+                500
             )
 
             final_url = page.url
@@ -674,6 +687,10 @@ async def scan_website(url: str) -> dict:
 
             result["success"] = True
 
+            await context.unroute_all(
+                behavior="ignoreErrors"
+            )
+
             await context.close()
             context = None
 
@@ -691,6 +708,9 @@ async def scan_website(url: str) -> dict:
     finally:
         if context:
             try:
+                await context.unroute_all(
+                    behavior="ignoreErrors"
+                )
                 await context.close()
             except Exception:
                 pass
