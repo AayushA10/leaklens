@@ -703,7 +703,23 @@ async def scan_website(url: str) -> dict:
         )
 
     except Exception as exc:
-        result["error"] = str(exc)
+        error_text = str(exc)
+
+        if (
+            "ERR_HTTP2_PROTOCOL_ERROR" in error_text
+            or "Timeout" in error_text
+            or "403" in error_text
+        ):
+            result["error"] = (
+                "This website appears to block automated scanning "
+                "or did not respond in time. Please try another "
+                "public page from the same website."
+            )
+        else:
+            result["error"] = (
+                "We could not scan this website right now. "
+                "Please try again in a moment."
+            )
 
     finally:
         if context:
