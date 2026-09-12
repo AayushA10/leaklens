@@ -594,3 +594,199 @@ async def analyze_performance(url: str) -> dict:
     )
 
     return result
+
+
+def analyze_performance_raw(raw_metrics: dict | None) -> dict:
+    """
+    Build the normal performance result from metrics already
+    collected by the crawler's browser session.
+
+    This avoids launching a second Chromium instance.
+    """
+
+    result = {
+        "status": "unavailable",
+        "score": None,
+        "load_time_ms": None,
+        "dom_content_loaded_ms": None,
+        "page_size_kb": None,
+        "requests_count": None,
+        "issues_count": 0,
+        "issues": [],
+        "error": None,
+    }
+
+    if not raw_metrics:
+        result["error"] = (
+            "Performance metrics were unavailable."
+        )
+        return result
+
+    result["load_time_ms"] = raw_metrics.get(
+        "load_time_ms"
+    )
+    result["dom_content_loaded_ms"] = raw_metrics.get(
+        "dom_content_loaded_ms"
+    )
+    result["page_size_kb"] = raw_metrics.get(
+        "page_size_kb"
+    )
+    result["requests_count"] = raw_metrics.get(
+        "requests_count"
+    )
+    result["status"] = "available"
+
+    issues = []
+
+    load_time = result.get(
+        "load_time_ms"
+    )
+
+    if load_time is not None:
+        if load_time > 5000:
+            issues.append(
+                {
+                    "type": "very_slow_load",
+                    "severity": "high",
+                    "category": "performance",
+                    "message": (
+                        f"The page took approximately "
+                        f"{load_time / 1000:.1f} seconds "
+                        f"to finish loading in this scan."
+                    ),
+                    "business_impact": (
+                        "Slow loading can create friction "
+                        "before visitors interact with the page."
+                    ),
+                    "recommendation": (
+                        "Review large images, JavaScript, "
+                        "third-party scripts, caching, and "
+                        "server response performance."
+                    ),
+                }
+            )
+
+        elif load_time > 3000:
+            issues.append(
+                {
+                    "type": "slow_load",
+                    "severity": "medium",
+                    "category": "performance",
+                    "message": (
+                        f"The page took approximately "
+                        f"{load_time / 1000:.1f} seconds "
+                        f"to finish loading in this scan."
+                    ),
+                    "business_impact": (
+                        "Visitors on slower devices or "
+                        "connections may experience friction."
+                    ),
+                    "recommendation": (
+                        "Optimize heavy assets and reduce "
+                        "unnecessary scripts where possible."
+                    ),
+                }
+            )
+
+    page_size = result.get(
+        "page_size_kb"
+    )
+
+    if page_size is not None:
+        if page_size > 5000:
+            issues.append(
+                {
+                    "type": "very_large_page",
+                    "severity": "medium",
+                    "category": "performance",
+                    "message": (
+                        f"The scan transferred approximately "
+                        f"{page_size / 1024:.1f} MB "
+                        f"of resources."
+                    ),
+                    "business_impact": (
+                        "Large pages may load slowly on mobile "
+                        "or limited-bandwidth connections."
+                    ),
+                    "recommendation": (
+                        "Compress images, reduce unnecessary "
+                        "assets, and lazy-load non-critical media."
+                    ),
+                }
+            )
+
+        elif page_size > 3000:
+            issues.append(
+                {
+                    "type": "large_page",
+                    "severity": "low",
+                    "category": "performance",
+                    "message": (
+                        f"The scan transferred approximately "
+                        f"{page_size / 1024:.1f} MB "
+                        f"of resources."
+                    ),
+                    "business_impact": (
+                        "Heavy pages can increase loading time "
+                        "for some visitors."
+                    ),
+                    "recommendation": (
+                        "Review images, fonts, scripts, "
+                        "and other large resources."
+                    ),
+                }
+            )
+
+    requests_count = result.get(
+        "requests_count"
+    )
+
+    if (
+        requests_count is not None
+        and requests_count > 150
+    ):
+        issues.append(
+            {
+                "type": "high_request_count",
+                "severity": "low",
+                "category": "performance",
+                "message": (
+                    f"The page made approximately "
+                    f"{requests_count} network requests."
+                ),
+                "business_impact": (
+                    "A large number of resources can increase "
+                    "page complexity and loading overhead."
+                ),
+                "recommendation": (
+                    "Review third-party scripts and remove "
+                    "unnecessary page resources."
+                ),
+            }
+        )
+
+    penalties = {
+        "critical": 30,
+        "high": 20,
+        "medium": 10,
+        "low": 5,
+    }
+
+    score = 100
+
+    for issue in issues:
+        score -= penalties.get(
+            issue.get("severity"),
+            0,
+        )
+
+    result["score"] = max(
+        0,
+        score,
+    )
+    result["issues"] = issues
+    result["issues_count"] = len(
+        issues
+    )
+
+    return result

@@ -275,6 +275,7 @@ async def scan_website(url: str) -> dict:
         "ctas": [],
         "has_phone_link": False,
         "has_email_link": False,
+        "performance_raw": None,
         "error": None,
     }
 
@@ -328,18 +329,6 @@ async def scan_website(url: str) -> dict:
             ):
                 request_url = request.url
 
-                # The crawler only needs page structure/content.
-                # Skip heavy visual resources to speed up scans.
-                if request.resource_type in {
-                    "image",
-                    "font",
-                    "media",
-                }:
-                    await route.abort(
-                        "blockedbyclient"
-                    )
-                    return
-
                 parsed_request = urlparse(
                     request_url
                 )
@@ -350,7 +339,11 @@ async def scan_website(url: str) -> dict:
                     "http",
                     "https",
                 }:
-                    await route.continue_()
+                    try:
+                        await route.continue_()
+                    except Exception as exc:
+                        if "Route is already handled" not in str(exc):
+                            raise
                     return
 
                 try:
@@ -360,12 +353,20 @@ async def scan_website(url: str) -> dict:
                     )
 
                 except UnsafeURLError:
-                    await route.abort(
-                        "blockedbyclient"
-                    )
+                    try:
+                        await route.abort(
+                            "blockedbyclient"
+                        )
+                    except Exception as exc:
+                        if "Route is already handled" not in str(exc):
+                            raise
                     return
 
-                await route.continue_()
+                try:
+                    await route.continue_()
+                except Exception as exc:
+                    if "Route is already handled" not in str(exc):
+                        raise
 
             await context.route(
                 "**/*",
@@ -373,6 +374,40 @@ async def scan_website(url: str) -> dict:
             )
 
             page = await context.new_page()
+
+            requests_count = 0
+            total_bytes = 0
+
+            def count_request(request):
+                nonlocal requests_count
+                requests_count += 1
+
+            async def count_response(response):
+                nonlocal total_bytes
+
+                try:
+                    headers = await response.all_headers()
+                    content_length = headers.get(
+                        "content-length"
+                    )
+
+                    if content_length:
+                        total_bytes += int(
+                            content_length
+                        )
+
+                except Exception:
+                    pass
+
+            page.on(
+                "request",
+                count_request,
+            )
+
+            page.on(
+                "response",
+                count_response,
+            )
 
             response = await page.goto(
                 url,
@@ -382,7 +417,7 @@ async def scan_website(url: str) -> dict:
 
             # Give dynamic content a short opportunity to render.
             await page.wait_for_timeout(
-                500
+                1000
             )
 
             final_url = page.url
@@ -393,6 +428,92 @@ async def scan_website(url: str) -> dict:
                 final_url,
                 dns_cache=dns_cache,
             )
+
+            timing = await page.evaluate(
+                """
+                () => {
+                    const navigation =
+                        performance.getEntriesByType(
+                            "navigation"
+                        )[0];
+
+                    if (!navigation) {
+                        return null;
+                    }
+
+                    return {
+                        loadTime:
+                            navigation.loadEventEnd -
+                            navigation.startTime,
+
+                        domContentLoaded:
+                            navigation.domContentLoadedEventEnd -
+                            navigation.startTime
+                    };
+                }
+                """
+            )
+
+            if timing:
+                load_time = round(
+                    timing.get(
+                        "loadTime",
+                        0,
+                    )
+                )
+
+                if load_time <= 0:
+                    load_time = round(
+                        timing.get(
+                            "domContentLoaded",
+                            0,
+                        )
+                    )
+
+                dom_content_loaded = round(
+                    timing.get(
+                        "domContentLoaded",
+                        0,
+                    )
+                )
+
+                if total_bytes == 0:
+                    resource_size = await page.evaluate(
+                        """
+                        () => {
+                            const resources =
+                                performance.getEntriesByType(
+                                    "resource"
+                                );
+
+                            return resources.reduce(
+                                (total, resource) => {
+                                    return total +
+                                        (
+                                            resource.transferSize ||
+                                            resource.encodedBodySize ||
+                                            0
+                                        );
+                                },
+                                0
+                            );
+                        }
+                        """
+                    )
+
+                    total_bytes = int(
+                        resource_size or 0
+                    )
+
+                result["performance_raw"] = {
+                    "load_time_ms": load_time,
+                    "dom_content_loaded_ms": dom_content_loaded,
+                    "page_size_kb": round(
+                        total_bytes / 1024,
+                        2,
+                    ),
+                    "requests_count": requests_count,
+                }
 
             result["final_url"] = (
                 final_url

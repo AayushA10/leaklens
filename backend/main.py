@@ -1,6 +1,5 @@
 from pathlib import Path
 import os
-import time
 import asyncio
 
 from dotenv import load_dotenv
@@ -24,7 +23,7 @@ from slowapi.util import get_remote_address
 from scanner.crawler import scan_website
 from scanner.seo import analyze_seo
 from scanner.conversion import analyze_conversion
-from scanner.performance import analyze_performance
+from scanner.performance import analyze_performance_raw
 from scanner.scoring import calculate_revenue_leak_score
 
 from services.report_store import (
@@ -305,11 +304,9 @@ async def scan(
         description="Website URL to scan",
     ),
 ):
-    crawler_start = time.perf_counter()
     website_data = await scan_website(
         url
     )
-    print(f"[SCAN PROFILE] crawler: {time.perf_counter() - crawler_start:.2f}s")
 
     if not website_data.get(
         "success"
@@ -322,11 +319,9 @@ async def scan(
             ),
         }
 
-    performance_start = time.perf_counter()
-    performance_result = await analyze_performance(
-        website_data.get("final_url") or url
+    performance_result = analyze_performance_raw(
+        website_data.get("performance_raw")
     )
-    print(f"[SCAN PROFILE] performance: {time.perf_counter() - performance_start:.2f}s")
 
     seo_result = analyze_seo(
         website_data
