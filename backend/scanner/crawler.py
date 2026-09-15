@@ -787,7 +787,7 @@ async def scan_website(url: str) -> dict:
                 response = await page.goto(
                     url,
                     wait_until="domcontentloaded",
-                    timeout=10000,
+                    timeout=6000,
                 )
             finally:
                 print(
