@@ -754,28 +754,15 @@ async def scan_website(url: str) -> dict:
                 count_response,
             )
 
-            # Retry navigation once for transient website/CDN failures.
-            response = None
-            navigation_error = None
-
-            for attempt in range(2):
-                try:
-                    response = await page.goto(
-                        url,
-                        wait_until="domcontentloaded",
-                        timeout=15000,
-                    )
-                    navigation_error = None
-                    break
-
-                except Exception as exc:
-                    navigation_error = exc
-
-                    if attempt == 0:
-                        await page.wait_for_timeout(1500)
-                        continue
-
-                    raise navigation_error
+            # Use one fast browser attempt.
+            # If browser navigation fails, the safe HTTP fallback
+            # handles the page instead of making the user wait
+            # through another full browser timeout.
+            response = await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=10000,
+            )
 
             # Give dynamic content a short opportunity to render.
             await page.wait_for_timeout(
@@ -897,7 +884,7 @@ async def scan_website(url: str) -> dict:
             result["success"] = True
 
             await context.unroute_all(
-                behavior="ignoreErrors"
+                behavior="wait"
             )
 
             await context.close()
