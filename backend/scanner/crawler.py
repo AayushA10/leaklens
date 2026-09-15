@@ -678,6 +678,17 @@ async def scan_website(url: str) -> dict:
                     request_url
                 )
 
+                def is_normal_route_shutdown(exc: Exception) -> bool:
+                    error_text = str(exc)
+
+                    return (
+                        "Route is already handled" in error_text
+                        or (
+                            "Target page, context or browser has been closed"
+                            in error_text
+                        )
+                    )
+
                 # data:, blob:, about:, etc. may be normal browser
                 # resources and cannot access network hosts directly.
                 if parsed_request.scheme not in {
@@ -687,7 +698,7 @@ async def scan_website(url: str) -> dict:
                     try:
                         await route.continue_()
                     except Exception as exc:
-                        if "Route is already handled" not in str(exc):
+                        if not is_normal_route_shutdown(exc):
                             raise
                     return
 
@@ -703,14 +714,14 @@ async def scan_website(url: str) -> dict:
                             "blockedbyclient"
                         )
                     except Exception as exc:
-                        if "Route is already handled" not in str(exc):
+                        if not is_normal_route_shutdown(exc):
                             raise
                     return
 
                 try:
                     await route.continue_()
                 except Exception as exc:
-                    if "Route is already handled" not in str(exc):
+                    if not is_normal_route_shutdown(exc):
                         raise
 
             await context.route(
