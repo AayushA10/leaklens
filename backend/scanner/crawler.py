@@ -952,7 +952,7 @@ async def scan_website(url: str) -> dict:
         if context:
             try:
                 await context.unroute_all(
-                    behavior="ignoreErrors"
+                    behavior="wait"
                 )
                 await context.close()
             except Exception:
