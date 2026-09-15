@@ -4,6 +4,7 @@ import ipaddress
 import socket
 from urllib.parse import urljoin, urlparse
 
+import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
@@ -247,6 +248,350 @@ async def validate_public_url(
         )
 
 
+def _populate_result_from_html(
+    result: dict,
+    html: str,
+    final_url: str,
+) -> None:
+    """
+    Populate SEO and conversion fields from HTML.
+    Shared by browser scans and HTTP fallback scans.
+    """
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    # Page title
+    if (
+        soup.title
+        and soup.title.string
+    ):
+        result["title"] = (
+            soup.title.string.strip()
+        )
+
+    # Meta description
+    meta_description = soup.find(
+        "meta",
+        attrs={
+            "name": "description"
+        },
+    )
+
+    if meta_description:
+        content = meta_description.get(
+            "content"
+        )
+
+        if content:
+            result[
+                "meta_description"
+            ] = content.strip()
+
+    # H1 headings
+    result["h1"] = [
+        heading.get_text(
+            " ",
+            strip=True,
+        )
+        for heading
+        in soup.find_all("h1")
+        if heading.get_text(
+            " ",
+            strip=True,
+        )
+    ]
+
+    # Links
+    links = soup.find_all(
+        "a",
+        href=True,
+    )
+
+    result["links_count"] = len(
+        links
+    )
+
+    parsed_current_url = urlparse(
+        final_url
+    )
+
+    current_domain = (
+        parsed_current_url
+        .netloc
+        .lower()
+    )
+
+    internal_links = 0
+    external_links = 0
+    detected_ctas = []
+
+    for link in links:
+        href = (
+            link.get(
+                "href",
+                "",
+            )
+            .strip()
+        )
+
+        text = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        if not href:
+            continue
+
+        href_lower = href.lower()
+
+        if href_lower.startswith(
+            "tel:"
+        ):
+            result[
+                "has_phone_link"
+            ] = True
+
+        if href_lower.startswith(
+            "mailto:"
+        ):
+            result[
+                "has_email_link"
+            ] = True
+
+        normalized_text = (
+            text.lower().strip()
+        )
+
+        if normalized_text:
+            for keyword in CTA_KEYWORDS:
+                if (
+                    keyword
+                    in normalized_text
+                ):
+                    detected_ctas.append(
+                        {
+                            "text": text,
+                            "href": href,
+                            "element": "link",
+                        }
+                    )
+                    break
+
+        absolute_url = urljoin(
+            final_url,
+            href,
+        )
+
+        parsed_link = urlparse(
+            absolute_url
+        )
+
+        if (
+            parsed_link.scheme
+            not in {
+                "http",
+                "https",
+            }
+        ):
+            continue
+
+        if (
+            parsed_link.netloc.lower()
+            == current_domain
+        ):
+            internal_links += 1
+        else:
+            external_links += 1
+
+    result[
+        "internal_links_count"
+    ] = internal_links
+
+    result[
+        "external_links_count"
+    ] = external_links
+
+    # Images
+    result[
+        "images_count"
+    ] = len(
+        soup.find_all("img")
+    )
+
+    # Forms
+    result[
+        "forms_count"
+    ] = len(
+        soup.find_all("form")
+    )
+
+    # Buttons
+    buttons = soup.find_all(
+        "button"
+    )
+
+    result[
+        "buttons_count"
+    ] = len(buttons)
+
+    for button in buttons:
+        text = button.get_text(
+            " ",
+            strip=True,
+        )
+
+        normalized_text = (
+            text.lower().strip()
+        )
+
+        if not normalized_text:
+            continue
+
+        for keyword in CTA_KEYWORDS:
+            if (
+                keyword
+                in normalized_text
+            ):
+                detected_ctas.append(
+                    {
+                        "text": text,
+                        "href": None,
+                        "element": "button",
+                    }
+                )
+                break
+
+    # Remove duplicate CTAs
+    unique_ctas = []
+    seen = set()
+
+    for cta in detected_ctas:
+        key = (
+            cta["text"].lower(),
+            cta["href"],
+            cta["element"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique_ctas.append(cta)
+
+    result["ctas"] = unique_ctas
+    result["cta_count"] = len(
+        unique_ctas
+    )
+
+
+async def _fetch_html_fallback(
+    url: str,
+    dns_cache: dict[str, bool],
+) -> tuple[str, str, int]:
+    """
+    Fetch public HTML without a browser.
+
+    Redirects are handled manually so every destination
+    is validated before LeakLens connects to it.
+    """
+
+    current_url = url
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; LeakLens/1.0; "
+            "+https://leaklens-beige.vercel.app)"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,*/*;q=0.8"
+        ),
+    }
+
+    timeout = httpx.Timeout(
+        10.0,
+        connect=5.0,
+    )
+
+    async with httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=timeout,
+        headers=headers,
+    ) as client:
+
+        for _ in range(6):
+            await validate_public_url(
+                current_url,
+                dns_cache=dns_cache,
+            )
+
+            response = await client.get(
+                current_url
+            )
+
+            if response.status_code in {
+                301,
+                302,
+                303,
+                307,
+                308,
+            }:
+                location = response.headers.get(
+                    "location"
+                )
+
+                if not location:
+                    raise RuntimeError(
+                        "Redirect response did not include a location."
+                    )
+
+                next_url = urljoin(
+                    current_url,
+                    location,
+                )
+
+                await validate_public_url(
+                    next_url,
+                    dns_cache=dns_cache,
+                )
+
+                current_url = next_url
+                continue
+
+            response.raise_for_status()
+
+            content_type = (
+                response.headers.get(
+                    "content-type",
+                    "",
+                )
+                .lower()
+            )
+
+            if (
+                content_type
+                and "text/html" not in content_type
+                and "application/xhtml+xml"
+                not in content_type
+            ):
+                raise RuntimeError(
+                    "Fallback response was not HTML."
+                )
+
+            return (
+                response.text,
+                str(response.url),
+                response.status_code,
+            )
+
+    raise RuntimeError(
+        "Too many redirects during fallback scan."
+    )
+
+
 async def scan_website(url: str) -> dict:
     """
     Visit a public website and collect information for
@@ -418,7 +763,7 @@ async def scan_website(url: str) -> dict:
                     response = await page.goto(
                         url,
                         wait_until="domcontentloaded",
-                        timeout=30000,
+                        timeout=15000,
                     )
                     navigation_error = None
                     break
@@ -543,284 +888,10 @@ async def scan_website(url: str) -> dict:
 
             html = await page.content()
 
-            soup = BeautifulSoup(
+            _populate_result_from_html(
+                result,
                 html,
-                "html.parser",
-            )
-
-            # -------------------------
-            # Page title
-            # -------------------------
-            if (
-                soup.title
-                and soup.title.string
-            ):
-                result["title"] = (
-                    soup.title.string.strip()
-                )
-
-            # -------------------------
-            # Meta description
-            # -------------------------
-            meta_description = soup.find(
-                "meta",
-                attrs={
-                    "name": "description"
-                },
-            )
-
-            if meta_description:
-                content = (
-                    meta_description.get(
-                        "content"
-                    )
-                )
-
-                if content:
-                    result[
-                        "meta_description"
-                    ] = content.strip()
-
-            # -------------------------
-            # H1 headings
-            # -------------------------
-            result["h1"] = [
-                heading.get_text(
-                    " ",
-                    strip=True,
-                )
-                for heading
-                in soup.find_all("h1")
-                if heading.get_text(
-                    " ",
-                    strip=True,
-                )
-            ]
-
-            # -------------------------
-            # Links
-            # -------------------------
-            links = soup.find_all(
-                "a",
-                href=True,
-            )
-
-            result["links_count"] = (
-                len(links)
-            )
-
-            parsed_current_url = urlparse(
-                final_url
-            )
-
-            current_domain = (
-                parsed_current_url
-                .netloc
-                .lower()
-            )
-
-            internal_links = 0
-            external_links = 0
-
-            detected_ctas = []
-
-            for link in links:
-
-                href = (
-                    link.get(
-                        "href",
-                        "",
-                    )
-                    .strip()
-                )
-
-                text = link.get_text(
-                    " ",
-                    strip=True,
-                )
-
-                if not href:
-                    continue
-
-                href_lower = (
-                    href.lower()
-                )
-
-                # -------------------------
-                # Phone / email detection
-                # -------------------------
-                if href_lower.startswith(
-                    "tel:"
-                ):
-                    result[
-                        "has_phone_link"
-                    ] = True
-
-                if href_lower.startswith(
-                    "mailto:"
-                ):
-                    result[
-                        "has_email_link"
-                    ] = True
-
-                # -------------------------
-                # CTA detection
-                # -------------------------
-                normalized_text = (
-                    text.lower().strip()
-                )
-
-                if normalized_text:
-                    for keyword in CTA_KEYWORDS:
-
-                        if (
-                            keyword
-                            in normalized_text
-                        ):
-                            detected_ctas.append(
-                                {
-                                    "text": text,
-                                    "href": href,
-                                    "element": "link",
-                                }
-                            )
-
-                            break
-
-                # -------------------------
-                # Internal/external links
-                # -------------------------
-                absolute_url = urljoin(
-                    final_url,
-                    href,
-                )
-
-                parsed_link = urlparse(
-                    absolute_url
-                )
-
-                if (
-                    parsed_link.scheme
-                    not in {
-                        "http",
-                        "https",
-                    }
-                ):
-                    continue
-
-                if (
-                    parsed_link.netloc.lower()
-                    == current_domain
-                ):
-                    internal_links += 1
-
-                else:
-                    external_links += 1
-
-            result[
-                "internal_links_count"
-            ] = internal_links
-
-            result[
-                "external_links_count"
-            ] = external_links
-
-            # -------------------------
-            # Images
-            # -------------------------
-            images = soup.find_all(
-                "img"
-            )
-
-            result[
-                "images_count"
-            ] = len(images)
-
-            # -------------------------
-            # Forms
-            # -------------------------
-            forms = soup.find_all(
-                "form"
-            )
-
-            result[
-                "forms_count"
-            ] = len(forms)
-
-            # -------------------------
-            # Buttons
-            # -------------------------
-            buttons = soup.find_all(
-                "button"
-            )
-
-            result[
-                "buttons_count"
-            ] = len(buttons)
-
-            for button in buttons:
-
-                text = button.get_text(
-                    " ",
-                    strip=True,
-                )
-
-                normalized_text = (
-                    text.lower().strip()
-                )
-
-                if not normalized_text:
-                    continue
-
-                for keyword in CTA_KEYWORDS:
-
-                    if (
-                        keyword
-                        in normalized_text
-                    ):
-                        detected_ctas.append(
-                            {
-                                "text": text,
-                                "href": None,
-                                "element": (
-                                    "button"
-                                ),
-                            }
-                        )
-
-                        break
-
-            # -------------------------
-            # Remove duplicate CTAs
-            # -------------------------
-            unique_ctas = []
-            seen = set()
-
-            for cta in detected_ctas:
-
-                key = (
-                    cta["text"].lower(),
-                    cta["href"],
-                    cta["element"],
-                )
-
-                if key in seen:
-                    continue
-
-                seen.add(
-                    key
-                )
-
-                unique_ctas.append(
-                    cta
-                )
-
-            result["ctas"] = (
-                unique_ctas
-            )
-
-            result["cta_count"] = (
-                len(unique_ctas)
+                final_url,
             )
 
             result["success"] = True
@@ -841,23 +912,54 @@ async def scan_website(url: str) -> dict:
         )
 
     except Exception as exc:
-        error_text = str(exc)
+        browser_error = str(exc)
 
-        if (
-            "ERR_HTTP2_PROTOCOL_ERROR" in error_text
-            or "Timeout" in error_text
-            or "403" in error_text
-        ):
-            result["error"] = (
-                "This website appears to block automated scanning "
-                "or did not respond in time. Please try another "
-                "public page from the same website."
+        # Browser scans can fail because of CDN/browser-specific
+        # behavior even when the public HTML is still reachable.
+        # Try a safe HTTP fallback before returning an error.
+        try:
+            (
+                fallback_html,
+                fallback_url,
+                fallback_status,
+            ) = await _fetch_html_fallback(
+                url,
+                dns_cache,
             )
-        else:
-            result["error"] = (
-                "We could not scan this website right now. "
-                "Please try again in a moment."
+
+            result["final_url"] = fallback_url
+            result["status_code"] = fallback_status
+            result["performance_raw"] = None
+
+            _populate_result_from_html(
+                result,
+                fallback_html,
+                fallback_url,
             )
+
+            result["success"] = True
+            result["error"] = None
+
+        except UnsafeURLError as fallback_exc:
+            result["error"] = (
+                f"Unsafe URL blocked: {fallback_exc}"
+            )
+
+        except Exception:
+            if (
+                "ERR_HTTP2_PROTOCOL_ERROR" in browser_error
+                or "Timeout" in browser_error
+                or "403" in browser_error
+            ):
+                result["error"] = (
+                    "This website could not be fully scanned right now. "
+                    "Please try again in a moment."
+                )
+            else:
+                result["error"] = (
+                    "We could not scan this website right now. "
+                    "Please try again in a moment."
+                )
 
     finally:
         if context:
