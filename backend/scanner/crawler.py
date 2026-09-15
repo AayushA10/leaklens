@@ -911,6 +911,11 @@ async def scan_website(url: str) -> dict:
 
     except Exception as exc:
         browser_error = str(exc)
+        print(
+            f"[LeakLens browser fallback] {url}: "
+            f"{type(exc).__name__}: {browser_error}",
+            flush=True,
+        )
 
         # Browser scans can fail because of CDN/browser-specific
         # behavior even when the public HTML is still reachable.
