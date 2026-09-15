@@ -1,3 +1,4 @@
+import time
 import os
 import asyncio
 import ipaddress
@@ -602,6 +603,8 @@ async def scan_website(url: str) -> dict:
     services, or other internal resources.
     """
 
+    scan_started = time.monotonic()
+
     result = {
         "url": url,
         "final_url": None,
@@ -654,8 +657,16 @@ async def scan_website(url: str) -> dict:
             if browser_channel:
                 launch_options["channel"] = browser_channel
 
+            browser_launch_started = time.monotonic()
+
             browser = await p.chromium.launch(
                 **launch_options
+            )
+
+            print(
+                f"[LeakLens timing] browser_launch="
+                f"{time.monotonic() - browser_launch_started:.2f}s",
+                flush=True,
             )
 
             context = await browser.new_context(
@@ -770,11 +781,20 @@ async def scan_website(url: str) -> dict:
             # If browser navigation fails, the safe HTTP fallback
             # handles the page instead of making the user wait
             # through another full browser timeout.
-            response = await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=10000,
-            )
+            navigation_started = time.monotonic()
+
+            try:
+                response = await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=10000,
+                )
+            finally:
+                print(
+                    f"[LeakLens timing] navigation="
+                    f"{time.monotonic() - navigation_started:.2f}s",
+                    flush=True,
+                )
 
             # Give dynamic content a short opportunity to render.
             await page.wait_for_timeout(
@@ -925,6 +945,8 @@ async def scan_website(url: str) -> dict:
         # behavior even when the public HTML is still reachable.
         # Try a safe HTTP fallback before returning an error.
         try:
+            fallback_started = time.monotonic()
+
             (
                 fallback_html,
                 fallback_url,
@@ -932,6 +954,12 @@ async def scan_website(url: str) -> dict:
             ) = await _fetch_html_fallback(
                 url,
                 dns_cache,
+            )
+
+            print(
+                f"[LeakLens timing] http_fallback="
+                f"{time.monotonic() - fallback_started:.2f}s",
+                flush=True,
             )
 
             result["final_url"] = fallback_url
@@ -969,6 +997,12 @@ async def scan_website(url: str) -> dict:
                 )
 
     finally:
+        print(
+            f"[LeakLens timing] total_scan="
+            f"{time.monotonic() - scan_started:.2f}s",
+            flush=True,
+        )
+
         if page:
             try:
                 await page.unroute_all(
