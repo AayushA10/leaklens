@@ -626,6 +626,7 @@ async def scan_website(url: str) -> dict:
 
     browser = None
     context = None
+    page = None
 
     # Cache DNS decisions during this individual scan.
     dns_cache: dict[str, bool] = {}
@@ -724,12 +725,12 @@ async def scan_website(url: str) -> dict:
                     if not is_normal_route_shutdown(exc):
                         raise
 
-            await context.route(
+            page = await context.new_page()
+
+            await page.route(
                 "**/*",
                 safe_route,
             )
-
-            page = await context.new_page()
 
             requests_count = 0
             total_bytes = 0
@@ -894,9 +895,12 @@ async def scan_website(url: str) -> dict:
 
             result["success"] = True
 
-            await context.unroute_all(
+            await page.unroute_all(
                 behavior="wait"
             )
+
+            await page.close()
+            page = None
 
             await context.close()
             context = None
@@ -965,11 +969,17 @@ async def scan_website(url: str) -> dict:
                 )
 
     finally:
-        if context:
+        if page:
             try:
-                await context.unroute_all(
+                await page.unroute_all(
                     behavior="wait"
                 )
+                await page.close()
+            except Exception:
+                pass
+
+        if context:
+            try:
                 await context.close()
             except Exception:
                 pass
