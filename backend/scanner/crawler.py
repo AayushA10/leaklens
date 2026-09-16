@@ -112,7 +112,16 @@ async def _resolve_hostname(hostname: str) -> set[str]:
         return addresses
 
     try:
-        return await asyncio.to_thread(resolve)
+        dns_started = time.monotonic()
+        addresses = await asyncio.to_thread(resolve)
+
+        print(
+            f"[LeakLens DNS] host={hostname} "
+            f"time={time.monotonic() - dns_started:.2f}s",
+            flush=True,
+        )
+
+        return addresses
 
     except socket.gaierror as exc:
         raise UnsafeURLError(
@@ -123,6 +132,7 @@ async def _resolve_hostname(hostname: str) -> set[str]:
 async def validate_public_url(
     url: str,
     dns_cache: dict[str, bool] | None = None,
+    dns_inflight: dict[str, asyncio.Task] | None = None,
 ) -> None:
     """
     Validate that a URL points to a normal public website.
@@ -226,9 +236,31 @@ async def validate_public_url(
 
         return
 
-    addresses = await _resolve_hostname(
-        hostname
-    )
+    if dns_inflight is not None:
+        task = dns_inflight.get(hostname)
+
+        if task is None:
+            task = asyncio.create_task(
+                _resolve_hostname(hostname)
+            )
+            dns_inflight[hostname] = task
+
+        try:
+            addresses = await task
+        finally:
+            if (
+                dns_inflight.get(hostname)
+                is task
+                and task.done()
+            ):
+                dns_inflight.pop(
+                    hostname,
+                    None,
+                )
+    else:
+        addresses = await _resolve_hostname(
+            hostname
+        )
 
     if not addresses:
         raise UnsafeURLError(
@@ -633,6 +665,7 @@ async def scan_website(url: str) -> dict:
 
     # Cache DNS decisions during this individual scan.
     dns_cache: dict[str, bool] = {}
+    dns_inflight: dict[str, asyncio.Task] = {}
 
     try:
         # ------------------------------------------------
@@ -718,6 +751,7 @@ async def scan_website(url: str) -> dict:
                     await validate_public_url(
                         request_url,
                         dns_cache=dns_cache,
+                        dns_inflight=dns_inflight,
                     )
 
                 except UnsafeURLError:
