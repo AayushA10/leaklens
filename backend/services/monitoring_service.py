@@ -451,19 +451,10 @@ async def run_monitoring_scan(
         current_report,
     )
 
-    sync_issue_lifecycle(
-        site_id,
-        comparison,
-    )
-
-    snapshot = create_scan_snapshot(
+    snapshot = persist_monitoring_result(
         site_id=site_id,
         report=current_report,
-        success=True,
-    )
-
-    update_scan_schedule(
-        site_id
+        comparison=comparison,
     )
 
     return {
@@ -473,3 +464,97 @@ async def run_monitoring_scan(
         "comparison": comparison,
         "report": current_report,
     }
+
+
+def persist_monitoring_result(
+    site_id: str,
+    report: dict,
+    comparison: dict,
+) -> ScanSnapshot:
+    db = SessionLocal()
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        for issue in (
+            comparison.get("new", [])
+            + comparison.get("persistent", [])
+        ):
+            leak_issue = (
+                db.query(LeakIssue)
+                .filter(
+                    LeakIssue.site_id == site_id,
+                    LeakIssue.fingerprint == issue["fingerprint"],
+                )
+                .first()
+            )
+
+            if leak_issue is None:
+                leak_issue = LeakIssue(
+                    issue_id=uuid.uuid4().hex,
+                    site_id=site_id,
+                    fingerprint=issue["fingerprint"],
+                    category=issue["category"],
+                    issue_type=issue["issue_type"],
+                    severity=issue["severity"],
+                    message=issue["message"],
+                    recommendation=issue.get("recommendation"),
+                    status="open",
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+                db.add(leak_issue)
+            else:
+                leak_issue.category = issue["category"]
+                leak_issue.issue_type = issue["issue_type"]
+                leak_issue.severity = issue["severity"]
+                leak_issue.message = issue["message"]
+                leak_issue.recommendation = issue.get("recommendation")
+                leak_issue.status = "open"
+                leak_issue.last_seen_at = now
+                leak_issue.resolved_at = None
+
+        for issue in comparison.get("resolved", []):
+            leak_issue = (
+                db.query(LeakIssue)
+                .filter(
+                    LeakIssue.site_id == site_id,
+                    LeakIssue.fingerprint == issue["fingerprint"],
+                )
+                .first()
+            )
+
+            if leak_issue is not None:
+                leak_issue.status = "resolved"
+                leak_issue.resolved_at = now
+
+        snapshot = ScanSnapshot(
+            snapshot_id=uuid.uuid4().hex,
+            site_id=site_id,
+            report_json=json.dumps(
+                report,
+                ensure_ascii=False,
+            ),
+            success=True,
+        )
+        db.add(snapshot)
+
+        site = db.get(MonitoredSite, site_id)
+
+        if site is None:
+            raise ValueError("Monitored site not found.")
+
+        site.last_scanned_at = now
+        site.next_scan_at = now + timedelta(days=1)
+
+        db.commit()
+        db.refresh(snapshot)
+
+        return snapshot
+
+    except Exception:
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
