@@ -818,10 +818,13 @@ async def scan_website(url: str) -> dict:
             navigation_started = time.monotonic()
 
             try:
-                response = await page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=6000,
+                response = await asyncio.wait_for(
+                    page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=15000,
+                    ),
+                    timeout=6.0,
                 )
             finally:
                 print(
