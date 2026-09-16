@@ -920,3 +920,12 @@ async def download_pdf_report(
             f"{report_id}.pdf"
         ),
     )
+
+@app.get("/internal/db-tables")
+def get_database_tables():
+    from sqlalchemy import inspect
+    from database.db import engine
+
+    return {
+        "tables": inspect(engine).get_table_names()
+    }
