@@ -112,15 +112,7 @@ async def _resolve_hostname(hostname: str) -> set[str]:
         return addresses
 
     try:
-        dns_started = time.monotonic()
         addresses = await asyncio.to_thread(resolve)
-
-        print(
-            f"[LeakLens DNS] host={hostname} "
-            f"time={time.monotonic() - dns_started:.2f}s",
-            flush=True,
-        )
-
         return addresses
 
     except socket.gaierror as exc:
