@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.db import Base
@@ -214,6 +214,14 @@ class ScanSnapshot(Base):
 
 class LeakIssue(Base):
     __tablename__ = "leak_issues"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "site_id",
+            "fingerprint",
+            name="uq_leak_issues_site_fingerprint",
+        ),
+    )
 
     issue_id: Mapped[str] = mapped_column(
         String(64),
