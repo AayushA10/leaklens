@@ -124,6 +124,12 @@ class MonitoredSite(Base):
         nullable=True,
     )
 
+    owner_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
     monitoring_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
