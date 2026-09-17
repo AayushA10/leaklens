@@ -378,6 +378,35 @@ def update_scan_schedule(
         db.close()
 
 
+def schedule_failed_scan_retry(
+    site_id: str,
+) -> MonitoredSite | None:
+    db = SessionLocal()
+
+    try:
+        site = db.get(
+            MonitoredSite,
+            site_id,
+        )
+
+        if site is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        site.next_scan_at = (
+            now + timedelta(hours=1)
+        )
+
+        db.commit()
+        db.refresh(site)
+
+        return site
+
+    finally:
+        db.close()
+
+
 async def run_monitoring_scan(
     site_id: str,
 ) -> dict:
@@ -410,6 +439,10 @@ async def run_monitoring_scan(
     )
 
     if not website_data.get("success"):
+        schedule_failed_scan_retry(
+            site_id
+        )
+
         return {
             "success": False,
             "error": website_data.get(
