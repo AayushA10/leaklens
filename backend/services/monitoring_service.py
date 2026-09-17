@@ -14,6 +14,7 @@ from scanner.scoring import calculate_revenue_leak_score
 
 def create_monitored_site(
     website_url: str,
+    owner_id: str,
     website_title: str | None = None,
 ) -> MonitoredSite:
     db = SessionLocal()
@@ -25,6 +26,7 @@ def create_monitored_site(
             site_id=uuid.uuid4().hex,
             website_url=website_url,
             website_title=website_title,
+            owner_id=owner_id,
             monitoring_enabled=True,
             scan_frequency="daily",
             next_scan_at=now,
