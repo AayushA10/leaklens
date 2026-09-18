@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
+import { Show, SignInButton, UserButton } from "@clerk/react";import {
   ArrowRight,
   Search,
   TrendingUp,
@@ -553,13 +553,27 @@ function App() {
             </button>
           </div>
 
-          <button
-            className="nav-button"
-            type="button"
-            onClick={() => navigateToSection("scan")}
-          >
-            Free Scan
-          </button>
+          <div className="nav-actions">
+            <button
+              className="nav-button"
+              type="button"
+              onClick={() => navigateToSection("scan")}
+            >
+              Free Scan
+            </button>
+
+            <Show when="signed-out">
+              <SignInButton mode="modal">
+                <button className="nav-button" type="button">
+                  Sign In
+                </button>
+              </SignInButton>
+            </Show>
+
+            <Show when="signed-in">
+              <UserButton />
+            </Show>
+          </div>
         </div>
       </nav>
 

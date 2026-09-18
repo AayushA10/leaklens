@@ -10,3 +10,4 @@ stripe==15.6.1
 uvicorn==0.34.3
 slowapi==0.1.10
 alembic==1.16.5
+clerk-backend-api==7.0.0
