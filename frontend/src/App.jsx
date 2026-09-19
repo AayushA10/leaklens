@@ -97,6 +97,38 @@ function App() {
     return data;
   };
 
+  const handleAddMonitoringSite = async (event) => {
+    event.preventDefault();
+
+    const websiteUrl = newMonitoringUrl.trim();
+
+    if (!websiteUrl) {
+      setDashboardError("Please enter a website URL.");
+      return;
+    }
+
+    setAddingMonitoringSite(true);
+    setDashboardError("");
+
+    try {
+      const data = await createMonitoredSite(websiteUrl);
+
+      if (!data?.site) {
+        throw new Error("Unable to add website monitoring.");
+      }
+
+      setNewMonitoringUrl("");
+
+      window.location.href = `/dashboard/${data.site.site_id}`;
+    } catch (error) {
+      setDashboardError(
+        error.message || "Unable to add website monitoring."
+      );
+    } finally {
+      setAddingMonitoringSite(false);
+    }
+  };
+
   const legalPages = ["privacy", "terms", "refund", "contact"];
   const currentPath = window.location.pathname
     .replace(/^\/+|\/+$/g, "")
@@ -143,6 +175,8 @@ function App() {
   const [dashboardError, setDashboardError] = useState("");
   const [monitorScanLoading, setMonitorScanLoading] = useState(false);
   const [monitorScanMessage, setMonitorScanMessage] = useState("");
+  const [newMonitoringUrl, setNewMonitoringUrl] = useState("");
+  const [addingMonitoringSite, setAddingMonitoringSite] = useState(false);
 
   useEffect(() => {
     if (!isDashboardPage || !isSignedIn) {
@@ -256,45 +290,108 @@ function App() {
     setDashboardError("");
 
     try {
-      const response = await authenticatedFetch(
+      const scanResponse = await authenticatedFetch(
         `/monitoring/sites/${dashboardSiteId}/scan`,
         {
           method: "POST",
         }
       );
 
-      const data = await response
+      const scanData = await scanResponse
         .json()
         .catch(() => ({}));
 
-      if (!response.ok) {
+      if (!scanResponse.ok) {
         throw new Error(
-          data?.detail ||
+          scanData?.detail ||
             "Unable to run monitoring scan."
         );
       }
 
-      setMonitorScanMessage(
-        "Scan completed. Monitoring data has been refreshed."
-      );
+      const [
+        siteResponse,
+        issuesResponse,
+        resolvedIssuesResponse,
+        historyResponse,
+      ] = await Promise.all([
+        authenticatedFetch(
+          `/monitoring/sites/${dashboardSiteId}`
+        ),
+        authenticatedFetch(
+          `/monitoring/sites/${dashboardSiteId}/issues?status=open`
+        ),
+        authenticatedFetch(
+          `/monitoring/sites/${dashboardSiteId}/issues?status=resolved`
+        ),
+        authenticatedFetch(
+          `/monitoring/sites/${dashboardSiteId}/history?limit=30`
+        ),
+      ]);
 
-      window.setTimeout(
-        () => {
-          setMonitoredSites((currentSites) =>
+      const siteData = await siteResponse
+        .json()
+        .catch(() => ({}));
+
+      const issuesData = await issuesResponse
+        .json()
+        .catch(() => ({}));
+
+      const resolvedIssuesData =
+        await resolvedIssuesResponse
+          .json()
+          .catch(() => ({}));
+
+      const historyData = await historyResponse
+        .json()
+        .catch(() => ({}));
+
+      if (!siteResponse.ok) {
+        throw new Error(
+          siteData?.detail ||
+            "Unable to refresh monitored website."
+        );
+      }
+
+      if (!issuesResponse.ok) {
+        throw new Error(
+          issuesData?.detail ||
+            "Unable to refresh monitoring issues."
+        );
+      }
+
+      if (!resolvedIssuesResponse.ok) {
+        throw new Error(
+          resolvedIssuesData?.detail ||
+            "Unable to refresh resolved issues."
+        );
+      }
+
+      if (!historyResponse.ok) {
+        throw new Error(
+          historyData?.detail ||
+            "Unable to refresh scan history."
+        );
+      }
+
+      setMonitoredSites((currentSites) =>
         currentSites.map((site) =>
           site.site_id === dashboardSiteId
             ? {
                 ...site,
-                monitoring_enabled:
-                  data.monitoring_enabled,
-                next_scan_at:
-                  data.next_scan_at,
+                ...(siteData?.site || {}),
+                open_issues:
+                  issuesData?.issues || [],
+                resolved_issues:
+                  resolvedIssuesData?.issues || [],
+                scan_history:
+                  historyData?.history || [],
               }
             : site
         )
       );
-        },
-        700
+
+      setMonitorScanMessage(
+        "Scan completed. Monitoring data has been refreshed."
       );
     } catch (error) {
       setDashboardError(
@@ -1199,6 +1296,33 @@ function App() {
                       Monitor website health, recurring scans,
                       and revenue leak issues from one place.
                     </p>
+
+                    <form
+                      className="dashboard-add-site"
+                      onSubmit={handleAddMonitoringSite}
+                    >
+                      <input
+                        type="url"
+                        value={newMonitoringUrl}
+                        onChange={(event) =>
+                          setNewMonitoringUrl(event.target.value)
+                        }
+                        placeholder="https://example.com"
+                        required
+                        disabled={addingMonitoringSite}
+                        aria-label="Website URL"
+                      />
+
+                      <button
+                        className="section-cta"
+                        type="submit"
+                        disabled={addingMonitoringSite}
+                      >
+                        {addingMonitoringSite
+                          ? "Adding..."
+                          : "Add Website"}
+                      </button>
+                    </form>
 
                     {monitoredSites.length === 0 ? (
                       <div className="dashboard-empty">
