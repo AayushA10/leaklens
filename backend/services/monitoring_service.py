@@ -12,6 +12,23 @@ from scanner.performance import analyze_performance_raw
 from scanner.scoring import calculate_revenue_leak_score
 
 
+def list_monitored_sites(
+    owner_id: str,
+) -> list[MonitoredSite]:
+    db = SessionLocal()
+
+    try:
+        return (
+            db.query(MonitoredSite)
+            .filter(MonitoredSite.owner_id == owner_id)
+            .order_by(MonitoredSite.created_at.desc())
+            .all()
+        )
+
+    finally:
+        db.close()
+
+
 def create_monitored_site(
     website_url: str,
     owner_id: str,
@@ -350,6 +367,26 @@ def get_monitored_site(
         db.close()
 
 
+def get_owned_monitored_site(
+    site_id: str,
+    owner_id: str,
+) -> MonitoredSite | None:
+    db = SessionLocal()
+
+    try:
+        return (
+            db.query(MonitoredSite)
+            .filter(
+                MonitoredSite.site_id == site_id,
+                MonitoredSite.owner_id == owner_id,
+            )
+            .first()
+        )
+
+    finally:
+        db.close()
+
+
 def update_scan_schedule(
     site_id: str,
 ) -> MonitoredSite | None:
@@ -399,6 +436,41 @@ def schedule_failed_scan_retry(
         site.next_scan_at = (
             now + timedelta(hours=1)
         )
+
+        db.commit()
+        db.refresh(site)
+
+        return site
+
+    finally:
+        db.close()
+
+
+def set_monitoring_enabled(
+    site_id: str,
+    enabled: bool,
+) -> MonitoredSite | None:
+    db = SessionLocal()
+
+    try:
+        site = (
+            db.query(MonitoredSite)
+            .filter(MonitoredSite.site_id == site_id)
+            .first()
+        )
+
+        if site is None:
+            return None
+
+        site.monitoring_enabled = enabled
+
+        if enabled:
+            site.next_scan_at = (
+                datetime.now(timezone.utc)
+                + timedelta(days=1)
+            )
+        else:
+            site.next_scan_at = None
 
         db.commit()
         db.refresh(site)
@@ -590,6 +662,60 @@ def persist_monitoring_result(
     except Exception:
         db.rollback()
         raise
+
+    finally:
+        db.close()
+
+
+def list_scan_snapshots(
+    site_id: str,
+    limit: int = 30,
+) -> list[ScanSnapshot]:
+    db = SessionLocal()
+
+    try:
+        return (
+            db.query(ScanSnapshot)
+            .filter(
+                ScanSnapshot.site_id == site_id
+            )
+            .order_by(
+                ScanSnapshot.created_at.desc()
+            )
+            .limit(limit)
+            .all()
+        )
+
+    finally:
+        db.close()
+
+
+def list_site_issues(
+    site_id: str,
+    status: str | None = None,
+) -> list[LeakIssue]:
+    db = SessionLocal()
+
+    try:
+        query = (
+            db.query(LeakIssue)
+            .filter(
+                LeakIssue.site_id == site_id
+            )
+        )
+
+        if status:
+            query = query.filter(
+                LeakIssue.status == status
+            )
+
+        return (
+            query
+            .order_by(
+                LeakIssue.last_seen_at.desc()
+            )
+            .all()
+        )
 
     finally:
         db.close()

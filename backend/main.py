@@ -5,8 +5,10 @@ import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
+load_dotenv(".env.local", override=True)
 
 from fastapi import (
+    Body,
     FastAPI,
     Header,
     HTTPException,
@@ -15,6 +17,12 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+
+from clerk_backend_api import (
+    AuthenticateRequestOptions,
+    authenticate_request,
+)
+from clerk_backend_api.security.types import AuthStatus
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -46,6 +54,16 @@ from services.stripe_service import (
     construct_webhook_event,
     create_checkout_session,
     verify_paid_session,
+)
+
+from services.monitoring_service import (
+    create_monitored_site,
+    get_owned_monitored_site,
+    list_monitored_sites,
+    list_scan_snapshots,
+    list_site_issues,
+    run_monitoring_scan,
+    set_monitoring_enabled,
 )
 
 from database.db import init_db
@@ -97,6 +115,45 @@ app.add_middleware(
 # =================================
 # HELPERS
 # =================================
+
+def _require_clerk_user(request: Request) -> str:
+    secret_key = os.getenv("CLERK_SECRET_KEY")
+    if not secret_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Authentication is not configured.",
+        )
+
+    try:
+        auth_state = authenticate_request(
+            request,
+            AuthenticateRequestOptions(
+                secret_key=secret_key,
+            ),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token.",
+        )
+
+    if auth_state.status != AuthStatus.SIGNED_IN:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required.",
+        )
+
+    payload = auth_state.payload or {}
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user ID missing.",
+        )
+
+    return str(user_id)
+
 
 def _build_free_response(
     report_id: str,
@@ -920,3 +977,345 @@ async def download_pdf_report(
             f"{report_id}.pdf"
         ),
     )
+
+
+# =================================
+# MONITORING
+# =================================
+
+@app.post("/monitoring/sites")
+def add_monitored_site(
+    request: Request,
+    website_url: str = Body(..., embed=True),
+    website_title: str | None = Body(
+        None,
+        embed=True,
+    ),
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    website_url = website_url.strip()
+
+    if not website_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Website URL is required.",
+        )
+
+    site = create_monitored_site(
+        website_url=website_url,
+        owner_id=owner_id,
+        website_title=website_title,
+    )
+
+    return {
+        "success": True,
+        "site": {
+            "site_id": site.site_id,
+            "website_url": site.website_url,
+            "website_title": site.website_title,
+            "monitoring_enabled": (
+                site.monitoring_enabled
+            ),
+            "scan_frequency": (
+                site.scan_frequency
+            ),
+            "last_scanned_at": (
+                site.last_scanned_at
+            ),
+            "next_scan_at": (
+                site.next_scan_at
+            ),
+            "created_at": site.created_at,
+        },
+    }
+
+
+@app.get("/monitoring/sites")
+def get_monitoring_sites(
+    request: Request,
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    sites = list_monitored_sites(
+        owner_id
+    )
+
+    return {
+        "success": True,
+        "sites": [
+            {
+                "site_id": site.site_id,
+                "website_url": site.website_url,
+                "website_title": site.website_title,
+                "monitoring_enabled": (
+                    site.monitoring_enabled
+                ),
+                "scan_frequency": (
+                    site.scan_frequency
+                ),
+                "last_scanned_at": (
+                    site.last_scanned_at
+                ),
+                "next_scan_at": (
+                    site.next_scan_at
+                ),
+                "created_at": site.created_at,
+                "updated_at": site.updated_at,
+            }
+            for site in sites
+        ],
+    }
+
+
+@app.get("/monitoring/sites/{site_id}")
+def get_monitoring_site(
+    site_id: str,
+    request: Request,
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    return {
+        "success": True,
+        "site": {
+            "site_id": site.site_id,
+            "website_url": site.website_url,
+            "website_title": site.website_title,
+            "monitoring_enabled": (
+                site.monitoring_enabled
+            ),
+            "scan_frequency": (
+                site.scan_frequency
+            ),
+            "last_scanned_at": (
+                site.last_scanned_at
+            ),
+            "next_scan_at": (
+                site.next_scan_at
+            ),
+            "created_at": site.created_at,
+            "updated_at": site.updated_at,
+        },
+    }
+
+
+@app.post("/monitoring/sites/{site_id}/scan")
+async def scan_monitored_site(
+    site_id: str,
+    request: Request,
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    try:
+        result = await run_monitoring_scan(
+            site_id
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Monitoring scan failed: "
+                f"{str(exc)}"
+            ),
+        )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail=result.get(
+                "error",
+                "Monitoring scan failed.",
+            ),
+        )
+
+    return result
+
+
+@app.post("/monitoring/sites/{site_id}/toggle")
+def toggle_site_monitoring(
+    site_id: str,
+    request: Request,
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    updated_site = set_monitoring_enabled(
+        site_id=site_id,
+        enabled=not site.monitoring_enabled,
+    )
+
+    if updated_site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    return {
+        "success": True,
+        "monitoring_enabled": (
+            updated_site.monitoring_enabled
+        ),
+        "next_scan_at": (
+            updated_site.next_scan_at
+        ),
+    }
+
+
+@app.get("/monitoring/sites/{site_id}/history")
+def get_monitoring_history(
+    site_id: str,
+    request: Request,
+    limit: int = Query(
+        30,
+        ge=1,
+        le=100,
+    ),
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    snapshots = list_scan_snapshots(
+        site_id=site_id,
+        limit=limit,
+    )
+
+    return {
+        "success": True,
+        "site_id": site_id,
+        "history": [
+            {
+                "snapshot_id": (
+                    snapshot.snapshot_id
+                ),
+                "success": snapshot.success,
+                "created_at": (
+                    snapshot.created_at
+                ),
+            }
+            for snapshot in snapshots
+        ],
+    }
+
+
+@app.get("/monitoring/sites/{site_id}/issues")
+def get_monitoring_issues(
+    site_id: str,
+    request: Request,
+    status: str | None = Query(
+        None,
+    ),
+):
+    owner_id = _require_clerk_user(
+        request
+    )
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    if status not in (
+        None,
+        "open",
+        "resolved",
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Status must be open or resolved."
+            ),
+        )
+
+    issues = list_site_issues(
+        site_id=site_id,
+        status=status,
+    )
+
+    return {
+        "success": True,
+        "site_id": site_id,
+        "issues": [
+            {
+                "issue_id": issue.issue_id,
+                "fingerprint": issue.fingerprint,
+                "category": issue.category,
+                "issue_type": issue.issue_type,
+                "severity": issue.severity,
+                "message": issue.message,
+                "recommendation": (
+                    issue.recommendation
+                ),
+                "status": issue.status,
+                "first_seen_at": (
+                    issue.first_seen_at
+                ),
+                "last_seen_at": (
+                    issue.last_seen_at
+                ),
+                "resolved_at": (
+                    issue.resolved_at
+                ),
+            }
+            for issue in issues
+        ],
+    }

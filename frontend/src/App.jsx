@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Show, SignInButton, UserButton } from "@clerk/react";import {
+import {
+  Show,
+  SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/react";
+import {
   ArrowRight,
   Search,
   TrendingUp,
@@ -27,6 +33,70 @@ const API_BASE_URL = (
 ).replace(/\/$/, "");
 
 function App() {
+  const { getToken, isSignedIn } = useAuth();
+
+  const authenticatedFetch = async (
+    endpoint,
+    options = {}
+  ) => {
+    const token = await getToken();
+
+    if (!token) {
+      throw new Error(
+        "Please sign in to access monitoring."
+      );
+    }
+
+    const headers = new Headers(
+      options.headers || {}
+    );
+
+    headers.set(
+      "Authorization",
+      `Bearer ${token}`
+    );
+
+    return fetch(
+      `${API_BASE_URL}${endpoint}`,
+      {
+        ...options,
+        headers,
+      }
+    );
+  };
+
+  const createMonitoredSite = async (
+    websiteUrl,
+    websiteTitle = null
+  ) => {
+    const response = await authenticatedFetch(
+      "/monitoring/sites",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          website_url: websiteUrl,
+          website_title: websiteTitle,
+        }),
+      }
+    );
+
+    const data = await response
+      .json()
+      .catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        data?.detail ||
+          "Unable to add website monitoring."
+      );
+    }
+
+    return data;
+  };
+
   const legalPages = ["privacy", "terms", "refund", "contact"];
   const currentPath = window.location.pathname
     .replace(/^\/+|\/+$/g, "")
@@ -35,6 +105,23 @@ function App() {
   const activeLegalPage = legalPages.includes(currentPath)
     ? currentPath
     : null;
+
+  const dashboardParts = currentPath.split("/");
+
+  const isDashboardPage =
+    dashboardParts[0] === "dashboard";
+
+  const dashboardSiteId =
+    dashboardParts.length === 2
+      ? dashboardParts[1]
+      : null;
+
+  const isDashboardDetailPage =
+    Boolean(dashboardSiteId);
+
+  const goDashboard = () => {
+    window.location.href = "/dashboard";
+  };
 
   const goHome = () => {
     window.location.href = "/";
@@ -50,6 +137,226 @@ function App() {
   const [unlockError, setUnlockError] = useState("");
   const [paymentMessage, setPaymentMessage] = useState("");
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const [monitoredSites, setMonitoredSites] = useState([]);
+  const [dashboardLoading, setDashboardLoading] = useState(isDashboardPage);
+  const [dashboardError, setDashboardError] = useState("");
+  const [monitorScanLoading, setMonitorScanLoading] = useState(false);
+  const [monitorScanMessage, setMonitorScanMessage] = useState("");
+
+  useEffect(() => {
+    if (!isDashboardPage || !isSignedIn) {
+      return;
+    }
+
+    setDashboardLoading(true);
+    setDashboardError("");
+
+    authenticatedFetch("/monitoring/sites")
+      .then(async (response) => {
+        const data = await response
+          .json()
+          .catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(
+            data?.detail ||
+              "Unable to load monitored websites."
+          );
+        }
+
+        const sites = data?.sites || [];
+
+        const enrichedSites = await Promise.all(
+          sites.map(async (site) => {
+            const [
+              issuesResponse,
+              resolvedIssuesResponse,
+              historyResponse,
+            ] = await Promise.all([
+              authenticatedFetch(
+                `/monitoring/sites/${site.site_id}/issues?status=open`
+              ),
+              authenticatedFetch(
+                `/monitoring/sites/${site.site_id}/issues?status=resolved`
+              ),
+              authenticatedFetch(
+                `/monitoring/sites/${site.site_id}/history?limit=30`
+              ),
+            ]);
+
+            const issuesData = await issuesResponse
+              .json()
+              .catch(() => ({}));
+
+            const resolvedIssuesData =
+              await resolvedIssuesResponse
+                .json()
+                .catch(() => ({}));
+
+            const historyData = await historyResponse
+              .json()
+              .catch(() => ({}));
+
+            if (!issuesResponse.ok) {
+              throw new Error(
+                issuesData?.detail ||
+                  "Unable to load monitoring issues."
+              );
+            }
+
+            if (!resolvedIssuesResponse.ok) {
+              throw new Error(
+                resolvedIssuesData?.detail ||
+                  "Unable to load resolved issues."
+              );
+            }
+
+            if (!historyResponse.ok) {
+              throw new Error(
+                historyData?.detail ||
+                  "Unable to load scan history."
+              );
+            }
+
+            return {
+              ...site,
+              open_issues:
+                issuesData?.issues || [],
+              resolved_issues:
+                resolvedIssuesData?.issues || [],
+              scan_history:
+                historyData?.history || [],
+            };
+          })
+        );
+
+        setMonitoredSites(
+          enrichedSites
+        );
+      })
+      .catch((error) => {
+        setDashboardError(
+          error.message ||
+            "Unable to load monitored websites."
+        );
+      })
+      .finally(() => {
+        setDashboardLoading(false);
+      });
+  }, [isDashboardPage, isSignedIn]);
+
+  const handleMonitoringScan = async () => {
+    if (!dashboardSiteId) {
+      return;
+    }
+
+    setMonitorScanLoading(true);
+    setMonitorScanMessage("");
+    setDashboardError("");
+
+    try {
+      const response = await authenticatedFetch(
+        `/monitoring/sites/${dashboardSiteId}/scan`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Unable to run monitoring scan."
+        );
+      }
+
+      setMonitorScanMessage(
+        "Scan completed. Monitoring data has been refreshed."
+      );
+
+      window.setTimeout(
+        () => {
+          setMonitoredSites((currentSites) =>
+        currentSites.map((site) =>
+          site.site_id === dashboardSiteId
+            ? {
+                ...site,
+                monitoring_enabled:
+                  data.monitoring_enabled,
+                next_scan_at:
+                  data.next_scan_at,
+              }
+            : site
+        )
+      );
+        },
+        700
+      );
+    } catch (error) {
+      setDashboardError(
+        error.message ||
+          "Unable to run monitoring scan."
+      );
+    } finally {
+      setMonitorScanLoading(false);
+    }
+  };
+
+
+  const handleMonitoringToggle = async () => {
+    if (!dashboardSiteId) {
+      return;
+    }
+
+    setMonitorScanLoading(true);
+    setMonitorScanMessage("");
+    setDashboardError("");
+
+    try {
+      const response = await authenticatedFetch(
+        `/monitoring/sites/${dashboardSiteId}/toggle`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Unable to update monitoring."
+        );
+      }
+
+      setMonitoredSites((currentSites) =>
+        currentSites.map((site) =>
+          site.site_id === dashboardSiteId
+            ? {
+                ...site,
+                monitoring_enabled:
+                  data.monitoring_enabled,
+                next_scan_at:
+                  data.next_scan_at,
+              }
+            : site
+        )
+      );
+    } catch (error) {
+      setDashboardError(
+        error.message ||
+          "Unable to update monitoring."
+      );
+    } finally {
+      setMonitorScanLoading(false);
+    }
+  };
 
   const normalizeUrl = (value) => {
     const trimmed = value.trim();
@@ -500,6 +807,14 @@ function App() {
     return `${Math.max(0, Math.min(100, score))}%`;
   };
 
+  const selectedDashboardSite =
+    dashboardSiteId
+      ? monitoredSites.find(
+          (site) =>
+            site.site_id === dashboardSiteId
+        ) || null
+      : null;
+
   if (activeLegalPage) {
     return (
       <div className="app">
@@ -507,6 +822,463 @@ function App() {
           page={activeLegalPage}
           onHome={goHome}
         />
+      </div>
+    );
+  }
+
+  if (isDashboardPage) {
+    return (
+      <div className="app">
+        <nav className="navbar">
+          <div className="nav-container">
+            <button
+              className="logo logo-button"
+              type="button"
+              onClick={goHome}
+              aria-label="Go to LeakLens home"
+            >
+              <div className="logo-icon">
+                <TrendingUp size={20} />
+              </div>
+
+              <span>
+                Leak<span className="logo-accent">Lens</span>
+              </span>
+            </button>
+
+            <div className="nav-actions">
+              <button
+                className="nav-button"
+                type="button"
+                onClick={goHome}
+              >
+                Free Scan
+              </button>
+
+              <Show when="signed-in">
+                <UserButton />
+              </Show>
+            </div>
+          </div>
+        </nav>
+
+        <main>
+          <section className="dashboard-page">
+            <div className="landing-container">
+              {dashboardLoading && (
+                <p>
+                  Loading monitoring data...
+                </p>
+              )}
+
+              {dashboardError && (
+                <div className="error-message">
+                  {dashboardError}
+                </div>
+              )}
+
+              {!dashboardLoading &&
+                !dashboardError &&
+                isDashboardDetailPage &&
+                selectedDashboardSite && (
+                  <div className="dashboard-detail">
+                    <button
+                      className="nav-button"
+                      type="button"
+                      onClick={goDashboard}
+                    >
+                      ← Back to Dashboard
+                    </button>
+
+                    <div className="dashboard-detail-header">
+                      <div className="dashboard-detail-actions">
+                        <button
+                          className="section-cta"
+                          type="button"
+                          onClick={handleMonitoringScan}
+                          disabled={monitorScanLoading}
+                        >
+                          {monitorScanLoading
+                            ? "Scanning..."
+                            : "Scan Now"}
+                        </button>
+
+                        <button
+                          className="section-cta"
+                          type="button"
+                          onClick={handleMonitoringToggle}
+                          disabled={monitorScanLoading}
+                        >
+                          {selectedDashboardSite.monitoring_enabled
+                            ? "Pause Monitoring"
+                            : "Resume Monitoring"}
+                        </button>
+                      </div>
+
+                      {monitorScanMessage && (
+                        <div className="monitoring-message">
+                          {monitorScanMessage}
+                        </div>
+                      )}
+
+                      <span className="section-label">
+                        {selectedDashboardSite.monitoring_enabled
+                          ? "MONITORING ACTIVE"
+                          : "MONITORING PAUSED"}
+                      </span>
+
+                      <h1>
+                        {selectedDashboardSite.website_title ||
+                          selectedDashboardSite.website_url}
+                      </h1>
+
+                      <p>
+                        {selectedDashboardSite.website_url}
+                      </p>
+                    </div>
+
+                    <div className="dashboard-site-meta">
+                      <div>
+                        <strong>
+                          {
+                            selectedDashboardSite
+                              .open_issues?.length || 0
+                          }
+                        </strong>
+                        <span>Open issues</span>
+                      </div>
+
+                      <div>
+                        <strong>
+                          {
+                            selectedDashboardSite
+                              .scan_history?.length || 0
+                          }
+                        </strong>
+                        <span>Scans recorded</span>
+                      </div>
+
+                      <div>
+                        <strong>
+                          {selectedDashboardSite.scan_frequency ||
+                            "daily"}
+                        </strong>
+                        <span>Scan frequency</span>
+                      </div>
+
+                      <div>
+                        <strong>Last scan</strong>
+                        <span>
+                          {selectedDashboardSite.last_scanned_at
+                            ? new Date(
+                                selectedDashboardSite
+                                  .last_scanned_at
+                              ).toLocaleString()
+                            : "Not scanned yet"}
+                        </span>
+                      </div>
+
+                      <div>
+                        <strong>Next scan</strong>
+                        <span>
+                          {selectedDashboardSite.next_scan_at
+                            ? new Date(
+                                selectedDashboardSite
+                                  .next_scan_at
+                              ).toLocaleString()
+                            : "Not scheduled"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <section className="dashboard-detail-section">
+                      <span className="section-label">
+                        OPEN ISSUES
+                      </span>
+
+                      <h2>
+                        Revenue leaks currently detected
+                      </h2>
+
+                      {selectedDashboardSite.open_issues?.length ? (
+                        <div className="dashboard-issues">
+                          {selectedDashboardSite.open_issues.map(
+                            (issue) => (
+                              <article
+                                className="dashboard-issue-card"
+                                key={issue.issue_id}
+                              >
+                                <div>
+                                  <span
+                                    className={`severity ${getSeverityClass(
+                                      issue.severity
+                                    )}`}
+                                  >
+                                    {issue.severity}
+                                  </span>
+
+                                  <span>
+                                    {issue.category}
+                                  </span>
+                                </div>
+
+                                <h3>
+                                  {issue.issue_type
+                                    .replaceAll("_", " ")}
+                                </h3>
+
+                                <p>
+                                  {issue.message}
+                                </p>
+
+                                {issue.recommendation && (
+                                  <p>
+                                    <strong>
+                                      Recommended fix:
+                                    </strong>{" "}
+                                    {issue.recommendation}
+                                  </p>
+                                )}
+
+                                <small>
+                                  First seen:{" "}
+                                  {new Date(
+                                    issue.first_seen_at
+                                  ).toLocaleString()}
+                                </small>
+                              </article>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <p>
+                          No open issues detected.
+                        </p>
+                      )}
+                    </section>
+
+                    <section className="dashboard-detail-section">
+                      <span className="section-label">
+                        RESOLVED ISSUES
+                      </span>
+
+                      <h2>
+                        Revenue leaks fixed since monitoring began
+                      </h2>
+
+                      {selectedDashboardSite.resolved_issues?.length ? (
+                        <div className="dashboard-issues">
+                          {selectedDashboardSite.resolved_issues.map(
+                            (issue) => (
+                              <article
+                                className="dashboard-issue-card"
+                                key={issue.issue_id}
+                              >
+                                <div>
+                                  <span className="section-label">
+                                    RESOLVED
+                                  </span>
+
+                                  <span>
+                                    {issue.category}
+                                  </span>
+                                </div>
+
+                                <h3>
+                                  {issue.issue_type
+                                    .replaceAll("_", " ")}
+                                </h3>
+
+                                <p>
+                                  {issue.message}
+                                </p>
+
+                                <small>
+                                  Resolved:{" "}
+                                  {issue.resolved_at
+                                    ? new Date(
+                                        issue.resolved_at
+                                      ).toLocaleString()
+                                    : "Unknown"}
+                                </small>
+                              </article>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <p>
+                          No resolved issues yet.
+                        </p>
+                      )}
+                    </section>
+
+                    <section className="dashboard-detail-section">
+                      <span className="section-label">
+                        SCAN HISTORY
+                      </span>
+
+                      <h2>
+                        Monitoring activity
+                      </h2>
+
+                      {selectedDashboardSite.scan_history?.length ? (
+                        <div className="dashboard-history">
+                          {selectedDashboardSite.scan_history.map(
+                            (snapshot, index) => (
+                              <div
+                                className="dashboard-history-row"
+                                key={snapshot.snapshot_id}
+                              >
+                                <div>
+                                  <strong>
+                                    Scan #
+                                    {
+                                      selectedDashboardSite
+                                        .scan_history.length -
+                                      index
+                                    }
+                                  </strong>
+
+                                  <span>
+                                    {new Date(
+                                      snapshot.created_at
+                                    ).toLocaleString()}
+                                  </span>
+                                </div>
+
+                                <span>
+                                  {snapshot.success
+                                    ? "Successful"
+                                    : "Failed"}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <p>
+                          No scan history yet.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                )}
+
+              {!dashboardLoading &&
+                !dashboardError &&
+                isDashboardDetailPage &&
+                !selectedDashboardSite && (
+                  <div className="dashboard-empty">
+                    <h1>
+                      Monitored website not found
+                    </h1>
+
+                    <button
+                      className="section-cta"
+                      type="button"
+                      onClick={goDashboard}
+                    >
+                      Back to Dashboard
+                    </button>
+                  </div>
+                )}
+
+              {!dashboardLoading &&
+                !dashboardError &&
+                !isDashboardDetailPage && (
+                  <>
+                    <span className="section-label">
+                      MONITORING
+                    </span>
+
+                    <h1>
+                      LeakLens Dashboard
+                    </h1>
+
+                    <p>
+                      Monitor website health, recurring scans,
+                      and revenue leak issues from one place.
+                    </p>
+
+                    {monitoredSites.length === 0 ? (
+                      <div className="dashboard-empty">
+                        <h2>
+                          No monitored websites yet
+                        </h2>
+
+                        <p>
+                          Add a website to start recurring
+                          monitoring and issue tracking.
+                        </p>
+
+                        <button
+                          className="section-cta"
+                          type="button"
+                          onClick={goHome}
+                        >
+                          Scan a Website
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="dashboard-sites">
+                        {monitoredSites.map((site) => (
+                          <button
+                            className="dashboard-site-card"
+                            key={site.site_id}
+                            type="button"
+                            onClick={() => {
+                              window.location.href =
+                                `/dashboard/${site.site_id}`;
+                            }}
+                          >
+                            <div>
+                              <span className="section-label">
+                                {site.monitoring_enabled
+                                  ? "MONITORING ACTIVE"
+                                  : "MONITORING PAUSED"}
+                              </span>
+
+                              <h2>
+                                {site.website_title ||
+                                  site.website_url}
+                              </h2>
+
+                              <p>
+                                {site.website_url}
+                              </p>
+                            </div>
+
+                            <div className="dashboard-site-meta">
+                              <div>
+                                <strong>
+                                  {site.open_issues?.length || 0}
+                                </strong>
+                                <span>Open issues</span>
+                              </div>
+
+                              <div>
+                                <strong>
+                                  {site.scan_history?.length || 0}
+                                </strong>
+                                <span>Scans recorded</span>
+                              </div>
+
+                              <div>
+                                <strong>
+                                  {site.scan_frequency || "daily"}
+                                </strong>
+                                <span>Scan frequency</span>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+            </div>
+          </section>
+        </main>
       </div>
     );
   }
@@ -571,6 +1343,14 @@ function App() {
             </Show>
 
             <Show when="signed-in">
+              <button
+                className="nav-button"
+                type="button"
+                onClick={goDashboard}
+              >
+                Dashboard
+              </button>
+
               <UserButton />
             </Show>
           </div>
