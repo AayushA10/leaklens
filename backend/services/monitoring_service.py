@@ -719,3 +719,56 @@ def list_site_issues(
 
     finally:
         db.close()
+
+
+async def run_due_monitoring_scans() -> dict:
+    db = SessionLocal()
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        due_site_ids = [
+            site_id
+            for (site_id,) in (
+                db.query(MonitoredSite.site_id)
+                .filter(
+                    MonitoredSite.monitoring_enabled.is_(True),
+                    MonitoredSite.next_scan_at.isnot(None),
+                    MonitoredSite.next_scan_at <= now,
+                )
+                .all()
+            )
+        ]
+    finally:
+        db.close()
+
+    results = []
+
+    for site_id in due_site_ids:
+        try:
+            result = await run_monitoring_scan(site_id)
+        except Exception as exc:
+            schedule_failed_scan_retry(site_id)
+
+            result = {
+                "success": False,
+                "site_id": site_id,
+                "error": str(exc),
+            }
+
+        results.append(result)
+
+    return {
+        "success": True,
+        "due_sites": len(due_site_ids),
+        "processed": len(results),
+        "successful": sum(
+            1 for result in results
+            if result.get("success")
+        ),
+        "failed": sum(
+            1 for result in results
+            if not result.get("success")
+        ),
+        "results": results,
+    }
