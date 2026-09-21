@@ -62,6 +62,7 @@ from services.monitoring_service import (
     list_monitored_sites,
     list_scan_snapshots,
     list_site_issues,
+    run_due_monitoring_scans,
     run_monitoring_scan,
     set_monitoring_enabled,
 )
@@ -1319,3 +1320,24 @@ def get_monitoring_issues(
             for issue in issues
         ],
     }
+
+
+@app.post("/internal/run-monitoring")
+async def run_scheduled_monitoring(
+    x_cron_secret: str | None = Header(default=None),
+):
+    expected_secret = os.getenv("CRON_SECRET")
+
+    if not expected_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="Cron authentication is not configured.",
+        )
+
+    if x_cron_secret != expected_secret:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid cron credentials.",
+        )
+
+    return await run_due_monitoring_scans()

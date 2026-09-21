@@ -1,0 +1,20 @@
+name: LeakLens Monitoring
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-monitoring:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger due monitoring scans
+        run: |
+          curl --fail-with-body \
+            --retry 3 \
+            --retry-delay 10 \
+            -X POST \
+            https://leaklens-qk7t.onrender.com/internal/run-monitoring \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}"
