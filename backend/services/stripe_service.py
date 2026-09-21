@@ -126,6 +126,15 @@ def create_checkout_session(
 
     _configure_stripe()
 
+    price_id = os.getenv(
+        plan_config["price_env"]
+    )
+
+    if not price_id:
+        raise RuntimeError(
+            f'{plan_config["price_env"]} is not configured.'
+        )
+
     frontend_url = _get_frontend_url()
 
     success_url = (
@@ -319,15 +328,15 @@ def construct_webhook_event(
 
 SUBSCRIPTION_PLANS = {
     "starter": {
-        "price_cents": 500,
+        "price_env": "STRIPE_STARTER_PRICE_ID",
         "name": "LeakLens Starter",
     },
     "growth": {
-        "price_cents": 1500,
+        "price_env": "STRIPE_GROWTH_PRICE_ID",
         "name": "LeakLens Growth",
     },
     "pro": {
-        "price_cents": 2900,
+        "price_env": "STRIPE_PRO_PRICE_ID",
         "name": "LeakLens Pro",
     },
 }
@@ -384,20 +393,7 @@ def create_subscription_checkout_session(
         },
         line_items=[
             {
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": plan_config[
-                        "price_cents"
-                    ],
-                    "recurring": {
-                        "interval": "month",
-                    },
-                    "product_data": {
-                        "name": plan_config[
-                            "name"
-                        ],
-                    },
-                },
+                "price": price_id,
                 "quantity": 1,
             }
         ],
@@ -406,3 +402,76 @@ def create_subscription_checkout_session(
     )
 
     return session
+
+
+def create_customer_portal_session(
+    stripe_customer_id: str,
+    stripe_subscription_id: str | None = None,
+):
+    """
+    Create a Stripe Billing Portal session.
+
+    When a subscription ID is available, deep link
+    directly into the plan update flow and return to
+    the LeakLens dashboard after completion.
+    """
+
+    if not stripe_customer_id:
+        raise ValueError(
+            "Stripe customer ID is required."
+        )
+
+    _configure_stripe()
+
+    frontend_url = _get_frontend_url()
+    dashboard_url = f"{frontend_url}/dashboard"
+
+    session_params = {
+        "customer": stripe_customer_id,
+        "return_url": dashboard_url,
+    }
+
+    if stripe_subscription_id:
+        session_params["flow_data"] = {
+            "type": "subscription_update",
+            "subscription_update": {
+                "subscription": stripe_subscription_id,
+            },
+            "after_completion": {
+                "type": "redirect",
+                "redirect": {
+                    "return_url": dashboard_url,
+                },
+            },
+        }
+
+    session = stripe.billing_portal.Session.create(
+        **session_params
+    )
+
+    return session
+
+
+def get_plan_from_price_id(
+    price_id: str | None,
+) -> str | None:
+    """
+    Map a Stripe recurring Price ID back to a
+    LeakLens subscription plan.
+    """
+
+    if not price_id:
+        return None
+
+    for plan, config in SUBSCRIPTION_PLANS.items():
+        configured_price_id = os.getenv(
+            config["price_env"]
+        )
+
+        if (
+            configured_price_id
+            and configured_price_id == price_id
+        ):
+            return plan
+
+    return None

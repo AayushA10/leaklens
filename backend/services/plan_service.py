@@ -42,10 +42,10 @@ def get_plan_config(plan: str) -> dict:
     return PLAN_CONFIG.get(plan, PLAN_CONFIG["free"])
 
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from database.db import SessionLocal
-from database.models import MonthlyUsage, UserSubscription
+from database.models import MonthlyUsage, MonitoredSite, UserSubscription
 
 
 def get_or_create_subscription(user_id: str) -> UserSubscription:
@@ -215,6 +215,50 @@ def record_manual_scan(user_id: str) -> int:
         db.close()
 
 
+
+def can_run_ai_analysis(user_id: str) -> dict:
+    subscription = get_or_create_subscription(user_id)
+    usage = get_or_create_monthly_usage(user_id)
+    config = get_plan_config(subscription.plan)
+
+    limit = config["ai_analyses_per_month"]
+    used = usage.ai_analyses
+
+    return {
+        "allowed": used < limit,
+        "plan": subscription.plan,
+        "used": used,
+        "limit": limit,
+        "remaining": max(limit - used, 0),
+    }
+
+
+def record_ai_analysis(user_id: str) -> int:
+    billing_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    usage_id = f"{user_id}:{billing_month}"
+
+    # Ensure the row exists first.
+    get_or_create_monthly_usage(user_id)
+
+    db = SessionLocal()
+
+    try:
+        usage = (
+            db.query(MonthlyUsage)
+            .filter(MonthlyUsage.usage_id == usage_id)
+            .first()
+        )
+
+        usage.ai_analyses += 1
+
+        db.commit()
+        db.refresh(usage)
+
+        return usage.ai_analyses
+
+    finally:
+        db.close()
+
 def activate_subscription(
     user_id: str,
     plan: str,
@@ -265,6 +309,17 @@ def activate_subscription(
             stripe_subscription_id
         )
 
+        now = datetime.now(timezone.utc)
+        sites = (
+            db.query(MonitoredSite)
+            .filter(MonitoredSite.owner_id == user_id)
+            .all()
+        )
+
+        for site in sites:
+            site.scan_frequency = "daily"
+            site.next_scan_at = now + timedelta(days=1)
+
         db.commit()
         db.refresh(subscription)
 
@@ -314,6 +369,19 @@ def deactivate_subscription(
 
         subscription.plan = "free"
         subscription.status = status
+
+        now = datetime.now(timezone.utc)
+        sites = (
+            db.query(MonitoredSite)
+            .filter(
+                MonitoredSite.owner_id == subscription.user_id
+            )
+            .all()
+        )
+
+        for site in sites:
+            site.scan_frequency = "weekly"
+            site.next_scan_at = now + timedelta(days=7)
 
         db.commit()
         db.refresh(subscription)

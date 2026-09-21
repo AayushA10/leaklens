@@ -65,6 +65,39 @@ function App() {
     );
   };
 
+  const startSubscriptionManagement = async () => {
+    try {
+      const response = await authenticatedFetch(
+        "/account/subscription/manage",
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            "Unable to open subscription management."
+        );
+      }
+
+      if (!data.portal_url) {
+        throw new Error(
+          "Subscription management URL was not returned."
+        );
+      }
+
+      window.location.href = data.portal_url;
+    } catch (error) {
+      window.alert(
+        error.message ||
+          "Unable to open subscription management."
+      );
+    }
+  };
+
   const startSubscriptionCheckout = async (plan) => {
     try {
       const response = await authenticatedFetch(
@@ -215,6 +248,9 @@ function App() {
   const [dashboardError, setDashboardError] = useState("");
   const [monitorScanLoading, setMonitorScanLoading] = useState(false);
   const [monitorScanMessage, setMonitorScanMessage] = useState("");
+  const [monitorAiLoading, setMonitorAiLoading] = useState(false);
+  const [monitorAiAnalysis, setMonitorAiAnalysis] = useState(null);
+  const [monitorAiMessage, setMonitorAiMessage] = useState("");
   const [newMonitoringUrl, setNewMonitoringUrl] = useState("");
   const [addingMonitoringSite, setAddingMonitoringSite] = useState(false);
   const [accountPlan, setAccountPlan] = useState(null);
@@ -463,6 +499,69 @@ function App() {
       );
     } finally {
       setMonitorScanLoading(false);
+    }
+  };
+
+
+  const handleMonitoringAiAnalysis = async () => {
+    if (!dashboardSiteId) {
+      return;
+    }
+
+    setMonitorAiLoading(true);
+    setMonitorAiMessage("");
+    setDashboardError("");
+
+    try {
+      const response = await authenticatedFetch(
+        `/monitoring/sites/${dashboardSiteId}/ai-analysis`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        const detail = data?.detail;
+
+        const message =
+          typeof detail === "string"
+            ? detail
+            : detail?.message ||
+              "Unable to generate AI analysis.";
+
+        throw new Error(message);
+      }
+
+      setMonitorAiAnalysis(
+        data?.analysis || null
+      );
+
+      setMonitorAiMessage(
+        `AI analysis generated. ${data?.usage?.remaining ?? 0} analyses remaining this month.`
+      );
+
+      const planResponse = await authenticatedFetch(
+        "/account/plan"
+      );
+
+      const planData = await planResponse
+        .json()
+        .catch(() => ({}));
+
+      if (planResponse.ok) {
+        setAccountPlan(planData);
+      }
+    } catch (error) {
+      setDashboardError(
+        error.message ||
+          "Unable to generate AI analysis."
+      );
+    } finally {
+      setMonitorAiLoading(false);
     }
   };
 
@@ -1098,6 +1197,20 @@ function App() {
                             ? "Pause Monitoring"
                             : "Resume Monitoring"}
                         </button>
+
+                        <button
+                          className="section-cta"
+                          type="button"
+                          onClick={handleMonitoringAiAnalysis}
+                          disabled={
+                            monitorAiLoading ||
+                            monitorScanLoading
+                          }
+                        >
+                          {monitorAiLoading
+                            ? "Analyzing..."
+                            : "Analyze with AI"}
+                        </button>
                       </div>
 
                       {monitorScanMessage && (
@@ -1121,6 +1234,88 @@ function App() {
                         {selectedDashboardSite.website_url}
                       </p>
                     </div>
+
+                    {monitorAiMessage && (
+                      <div className="monitoring-message">
+                        {monitorAiMessage}
+                      </div>
+                    )}
+
+                    {monitorAiAnalysis && (
+                      <div className="dashboard-ai-analysis">
+                        <span className="section-label">
+                          AI ANALYSIS
+                        </span>
+
+                        {monitorAiAnalysis.executive_summary && (
+                          <div>
+                            <h2>Executive Summary</h2>
+                            <p>
+                              {monitorAiAnalysis.executive_summary}
+                            </p>
+                          </div>
+                        )}
+
+                        {monitorAiAnalysis.business_risks?.length > 0 && (
+                          <div>
+                            <h3>Business Risks</h3>
+                            <ul>
+                              {monitorAiAnalysis.business_risks.map(
+                                (risk, index) => (
+                                  <li key={`risk-${index}`}>
+                                    {typeof risk === "string"
+                                      ? risk
+                                      : risk?.description ||
+                                        risk?.title ||
+                                        JSON.stringify(risk)}
+                                  </li>
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        {monitorAiAnalysis.prioritized_fixes?.length > 0 && (
+                          <div>
+                            <h3>Prioritized Fixes</h3>
+                            <ul>
+                              {monitorAiAnalysis.prioritized_fixes.map(
+                                (fix, index) => (
+                                  <li key={`fix-${index}`}>
+                                    {typeof fix === "string"
+                                      ? fix
+                                      : fix?.recommendation ||
+                                        fix?.description ||
+                                        fix?.title ||
+                                        JSON.stringify(fix)}
+                                  </li>
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        {monitorAiAnalysis.quick_wins?.length > 0 && (
+                          <div>
+                            <h3>Quick Wins</h3>
+                            <ul>
+                              {monitorAiAnalysis.quick_wins.map(
+                                (win, index) => (
+                                  <li key={`win-${index}`}>
+                                    {typeof win === "string"
+                                      ? win
+                                      : win?.recommendation ||
+                                        win?.description ||
+                                        win?.title ||
+                                        JSON.stringify(win)}
+                                  </li>
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="dashboard-site-meta">
                       <div>
@@ -1422,6 +1617,14 @@ function App() {
 
                           <div>
                             <strong>
+                              {accountPlan.usage.ai_analyses}/
+                              {accountPlan.limits.ai_analyses_per_month}
+                            </strong>
+                            <span>AI analyses</span>
+                          </div>
+
+                          <div>
+                            <strong>
                               {accountPlan.limits.scan_frequency}
                             </strong>
                             <span>Monitoring</span>
@@ -1435,7 +1638,7 @@ function App() {
                           </div>
                         </div>
 
-                        {accountPlan.plan === "free" && (
+                        {accountPlan.plan === "free" ? (
                           <button
                             className="pricing-button primary-pricing dashboard-upgrade-button"
                             type="button"
@@ -1444,6 +1647,15 @@ function App() {
                             }}
                           >
                             View Upgrade Plans
+                            <ArrowRight size={18} />
+                          </button>
+                        ) : (
+                          <button
+                            className="pricing-button primary-pricing dashboard-upgrade-button"
+                            type="button"
+                            onClick={startSubscriptionManagement}
+                          >
+                            Manage Subscription
                             <ArrowRight size={18} />
                           </button>
                         )}

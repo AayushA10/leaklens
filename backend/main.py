@@ -53,13 +53,17 @@ from services.pdf_service import (
 from services.stripe_service import (
     construct_webhook_event,
     create_checkout_session,
+    create_customer_portal_session,
     create_subscription_checkout_session,
+    get_plan_from_price_id,
     verify_paid_session,
 )
 
 from services.monitoring_service import (
     create_monitored_site,
     get_owned_monitored_site,
+    get_latest_snapshot,
+    snapshot_report,
     list_monitored_sites,
     list_scan_snapshots,
     list_site_issues,
@@ -71,8 +75,10 @@ from services.monitoring_service import (
 from services.plan_service import (
     activate_subscription,
     can_add_monitored_site,
+    can_run_ai_analysis,
     can_run_manual_scan,
     deactivate_subscription,
+    record_ai_analysis,
     record_manual_scan,
 )
 
@@ -582,6 +588,30 @@ def create_subscription_checkout(
             detail="Invalid subscription plan.",
         )
 
+    from services.plan_service import get_or_create_subscription
+
+    existing_subscription = get_or_create_subscription(
+        owner_id
+    )
+
+    if (
+        existing_subscription.plan in {
+            "starter",
+            "growth",
+            "pro",
+        }
+        and existing_subscription.status == "active"
+        and existing_subscription.stripe_subscription_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "You already have an active subscription. "
+                "Manage your existing plan instead of "
+                "creating another subscription."
+            ),
+        )
+
     try:
         session = create_subscription_checkout_session(
             user_id=owner_id,
@@ -601,6 +631,51 @@ def create_subscription_checkout(
         "plan": normalized_plan,
         "checkout_url": session.url,
         "session_id": session.id,
+    }
+
+
+# =================================
+# MANAGE SUBSCRIPTION
+# =================================
+
+@app.post("/account/subscription/manage")
+def manage_subscription(
+    request: Request,
+):
+    owner_id = _require_clerk_user(request)
+
+    from services.plan_service import get_or_create_subscription
+
+    subscription = get_or_create_subscription(
+        owner_id
+    )
+
+    if not subscription.stripe_customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No Stripe billing account exists "
+                "for this user."
+            ),
+        )
+
+    try:
+        session = create_customer_portal_session(
+            subscription.stripe_customer_id,
+            subscription.stripe_subscription_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Unable to open subscription management: "
+                f"{str(exc)}"
+            ),
+        )
+
+    return {
+        "success": True,
+        "portal_url": session.url,
     }
 
 
@@ -895,6 +970,51 @@ async def stripe_webhook(
                     stripe_subscription_id=subscription_id,
                     status=stripe_status,
                 )
+
+            elif stripe_status in {
+                "active",
+                "trialing",
+            }:
+                items = _stripe_object_to_dict(
+                    stripe_subscription.get("items")
+                )
+                item_list = items.get("data") or []
+
+                if item_list:
+                    first_item = _stripe_object_to_dict(
+                        item_list[0]
+                    )
+                    price = _stripe_object_to_dict(
+                        first_item.get("price")
+                    )
+                    price_id = price.get("id")
+                    plan = get_plan_from_price_id(
+                        price_id
+                    )
+
+                    metadata = _stripe_object_to_dict(
+                        stripe_subscription.get(
+                            "metadata"
+                        )
+                    )
+
+                    user_id = metadata.get(
+                        "user_id"
+                    )
+
+                    customer_id = (
+                        stripe_subscription.get(
+                            "customer"
+                        )
+                    )
+
+                    if user_id and plan:
+                        activate_subscription(
+                            user_id=user_id,
+                            plan=plan,
+                            stripe_customer_id=customer_id,
+                            stripe_subscription_id=subscription_id,
+                        )
 
     return {
         "received": True,
@@ -1522,6 +1642,108 @@ async def run_scheduled_monitoring(
 # =================================
 # SUBSCRIPTION / PLAN
 # =================================
+
+# =================================
+# MONITORED SITE AI ANALYSIS
+# =================================
+
+@app.post("/monitoring/sites/{site_id}/ai-analysis")
+async def generate_monitoring_ai_analysis(
+    site_id: str,
+    request: Request,
+):
+    owner_id = _require_clerk_user(request)
+
+    site = get_owned_monitored_site(
+        site_id=site_id,
+        owner_id=owner_id,
+    )
+
+    if site is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Monitored site not found.",
+        )
+
+    snapshot = get_latest_snapshot(
+        site_id
+    )
+
+    report = snapshot_report(
+        snapshot
+    )
+
+    if not report:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No completed scan is available for "
+                "AI analysis. Run a scan first."
+            ),
+        )
+
+    ai_access = can_run_ai_analysis(
+        owner_id
+    )
+
+    if not ai_access["allowed"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "AI_ANALYSIS_LIMIT_REACHED",
+                "message": (
+                    "Monthly AI analysis limit reached "
+                    "for your current plan."
+                ),
+                "plan": ai_access["plan"],
+                "used": ai_access["used"],
+                "limit": ai_access["limit"],
+                "remaining": ai_access["remaining"],
+            },
+        )
+
+    ai_result = await generate_ai_analysis(
+        report
+    )
+
+    if not ai_result.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail=ai_result.get(
+                "error",
+                "Unable to generate AI analysis.",
+            ),
+        )
+
+    analysis = ai_result.get(
+        "analysis"
+    )
+
+    if not analysis:
+        raise HTTPException(
+            status_code=502,
+            detail="AI analysis returned no usable result.",
+        )
+
+    used = record_ai_analysis(
+        owner_id
+    )
+
+    return {
+        "success": True,
+        "site_id": site_id,
+        "snapshot_id": snapshot.snapshot_id,
+        "analysis": analysis,
+        "usage": {
+            "used": used,
+            "limit": ai_access["limit"],
+            "remaining": max(
+                ai_access["limit"] - used,
+                0,
+            ),
+        },
+    }
+
 
 @app.get("/account/plan")
 def get_account_plan(
