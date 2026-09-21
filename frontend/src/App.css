@@ -1648,10 +1648,10 @@ html {
 }
 
 .pricing-grid {
-  max-width: 940px;
+  max-width: 1240px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -2691,6 +2691,90 @@ html {
   }
 
   .dashboard-add-site .section-cta {
+    width: 100%;
+  }
+}
+
+/* =================================
+   DASHBOARD PLAN
+   ================================= */
+
+.dashboard-plan-card {
+  margin: 28px 0;
+  padding: 26px;
+  border: 1px solid rgba(66, 227, 164, 0.18);
+  border-radius: 18px;
+  background: rgba(66, 227, 164, 0.035);
+}
+
+.dashboard-plan-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.dashboard-plan-heading h2 {
+  margin: 7px 0 0;
+  font-family: "Manrope", sans-serif;
+  font-size: 24px;
+}
+
+.dashboard-plan-price {
+  color: #42e3a4;
+  font-family: "Manrope", sans-serif;
+  font-size: 28px;
+}
+
+.dashboard-plan-price span {
+  margin-left: 3px;
+  color: #73827d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-plan-usage {
+  margin-top: 24px;
+  padding-top: 22px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-plan-usage div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dashboard-plan-usage strong {
+  color: #dbe7e2;
+  font-family: "Manrope", sans-serif;
+  font-size: 18px;
+  text-transform: capitalize;
+}
+
+.dashboard-plan-usage span {
+  color: #73827d;
+  font-size: 11px;
+}
+
+.dashboard-upgrade-button {
+  width: fit-content;
+  margin-top: 24px;
+}
+
+@media (max-width: 700px) {
+  .dashboard-plan-heading {
+    flex-direction: column;
+  }
+
+  .dashboard-plan-usage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-upgrade-button {
     width: 100%;
   }
 }

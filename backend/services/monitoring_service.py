@@ -33,6 +33,7 @@ def create_monitored_site(
     website_url: str,
     owner_id: str,
     website_title: str | None = None,
+    scan_frequency: str = "daily",
 ) -> MonitoredSite:
     db = SessionLocal()
 
@@ -45,7 +46,7 @@ def create_monitored_site(
             website_title=website_title,
             owner_id=owner_id,
             monitoring_enabled=True,
-            scan_frequency="daily",
+            scan_frequency=scan_frequency,
             next_scan_at=now,
         )
 
@@ -404,8 +405,9 @@ def update_scan_schedule(
         now = datetime.now(timezone.utc)
 
         site.last_scanned_at = now
-        site.next_scan_at = (
-            now + timedelta(days=1)
+        site.next_scan_at = get_next_scan_time(
+            site.scan_frequency,
+            now,
         )
 
         db.commit()
@@ -415,6 +417,18 @@ def update_scan_schedule(
 
     finally:
         db.close()
+
+
+def get_next_scan_time(
+    scan_frequency: str,
+    now: datetime | None = None,
+) -> datetime:
+    current_time = now or datetime.now(timezone.utc)
+
+    if scan_frequency == "weekly":
+        return current_time + timedelta(days=7)
+
+    return current_time + timedelta(days=1)
 
 
 def schedule_failed_scan_retry(
@@ -465,9 +479,8 @@ def set_monitoring_enabled(
         site.monitoring_enabled = enabled
 
         if enabled:
-            site.next_scan_at = (
-                datetime.now(timezone.utc)
-                + timedelta(days=1)
+            site.next_scan_at = get_next_scan_time(
+                site.scan_frequency,
             )
         else:
             site.next_scan_at = None
@@ -652,7 +665,10 @@ def persist_monitoring_result(
             raise ValueError("Monitored site not found.")
 
         site.last_scanned_at = now
-        site.next_scan_at = now + timedelta(days=1)
+        site.next_scan_at = get_next_scan_time(
+            site.scan_frequency,
+            now,
+        )
 
         db.commit()
         db.refresh(snapshot)

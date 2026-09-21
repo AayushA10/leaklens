@@ -40,3 +40,5 @@ frontend/dist/
 
 # Generated reports
 backend/reports/
+# Local backend secrets
+backend/.env.local

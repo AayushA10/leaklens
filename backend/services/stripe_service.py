@@ -312,3 +312,97 @@ def construct_webhook_event(
         sig_header=signature,
         secret=webhook_secret,
     )
+
+# =================================
+# SUBSCRIPTION CHECKOUT
+# =================================
+
+SUBSCRIPTION_PLANS = {
+    "starter": {
+        "price_cents": 500,
+        "name": "LeakLens Starter",
+    },
+    "growth": {
+        "price_cents": 1500,
+        "name": "LeakLens Growth",
+    },
+    "pro": {
+        "price_cents": 2900,
+        "name": "LeakLens Pro",
+    },
+}
+
+
+def create_subscription_checkout_session(
+    user_id: str,
+    plan: str,
+):
+    """
+    Create a Stripe-hosted recurring monthly Checkout Session
+    for a LeakLens SaaS subscription.
+    """
+
+    _configure_stripe()
+
+    normalized_plan = plan.strip().lower()
+
+    plan_config = SUBSCRIPTION_PLANS.get(
+        normalized_plan
+    )
+
+    if not plan_config:
+        raise ValueError(
+            "Invalid subscription plan."
+        )
+
+    frontend_url = _get_frontend_url()
+
+    success_url = (
+        f"{frontend_url}/dashboard"
+        f"?subscription=success"
+        f"&session_id={{CHECKOUT_SESSION_ID}}"
+    )
+
+    cancel_url = (
+        f"{frontend_url}/#pricing"
+    )
+
+    session = stripe.checkout.Session.create(
+        mode="subscription",
+        client_reference_id=user_id,
+        metadata={
+            "user_id": user_id,
+            "plan": normalized_plan,
+            "product": "leaklens_subscription",
+        },
+        subscription_data={
+            "metadata": {
+                "user_id": user_id,
+                "plan": normalized_plan,
+                "product": "leaklens_subscription",
+            },
+        },
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": plan_config[
+                        "price_cents"
+                    ],
+                    "recurring": {
+                        "interval": "month",
+                    },
+                    "product_data": {
+                        "name": plan_config[
+                            "name"
+                        ],
+                    },
+                },
+                "quantity": 1,
+            }
+        ],
+        success_url=success_url,
+        cancel_url=cancel_url,
+    )
+
+    return session

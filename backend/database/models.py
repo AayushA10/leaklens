@@ -305,3 +305,107 @@ class LeakIssue(Base):
             f"issue_id={self.issue_id!r} "
             f"status={self.status!r}>"
         )
+
+
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+
+    # Clerk user ID. One subscription per LeakLens user.
+    user_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    # free | starter | growth | pro
+    plan: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="free",
+        index=True,
+    )
+
+    # active | canceled | past_due
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class MonthlyUsage(Base):
+    __tablename__ = "monthly_usage"
+
+    # Example: clerk_user_id:2026-09
+    usage_id: Mapped[str] = mapped_column(
+        String(320),
+        primary_key=True,
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    # YYYY-MM
+    billing_month: Mapped[str] = mapped_column(
+        String(7),
+        nullable=False,
+        index=True,
+    )
+
+    manual_scans: Mapped[int] = mapped_column(
+        nullable=False,
+        default=0,
+    )
+
+    ai_analyses: Mapped[int] = mapped_column(
+        nullable=False,
+        default=0,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )

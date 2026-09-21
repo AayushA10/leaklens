@@ -53,6 +53,7 @@ from services.pdf_service import (
 from services.stripe_service import (
     construct_webhook_event,
     create_checkout_session,
+    create_subscription_checkout_session,
     verify_paid_session,
 )
 
@@ -65,6 +66,14 @@ from services.monitoring_service import (
     run_due_monitoring_scans,
     run_monitoring_scan,
     set_monitoring_enabled,
+)
+
+from services.plan_service import (
+    activate_subscription,
+    can_add_monitored_site,
+    can_run_manual_scan,
+    deactivate_subscription,
+    record_manual_scan,
 )
 
 from database.db import init_db
@@ -551,6 +560,51 @@ def create_report_checkout(
 
 
 # =================================
+# CREATE SUBSCRIPTION CHECKOUT
+# =================================
+
+@app.post("/account/subscription/checkout")
+def create_subscription_checkout(
+    request: Request,
+    plan: str = Query(...),
+):
+    owner_id = _require_clerk_user(request)
+
+    normalized_plan = plan.strip().lower()
+
+    if normalized_plan not in {
+        "starter",
+        "growth",
+        "pro",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid subscription plan.",
+        )
+
+    try:
+        session = create_subscription_checkout_session(
+            user_id=owner_id,
+            plan=normalized_plan,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Unable to create subscription checkout: "
+                f"{str(exc)}"
+            ),
+        )
+
+    return {
+        "success": True,
+        "plan": normalized_plan,
+        "checkout_url": session.url,
+        "session_id": session.id,
+    }
+
+
+# =================================
 # CONFIRM STRIPE RETURN
 # =================================
 
@@ -716,6 +770,45 @@ async def stripe_webhook(
                 )
             )
 
+        product = metadata.get(
+            "product"
+        )
+
+        if product == "leaklens_subscription":
+            user_id = metadata.get(
+                "user_id"
+            ) or session_data.get(
+                "client_reference_id"
+            )
+
+            plan = metadata.get(
+                "plan"
+            )
+
+            subscription_id = session_data.get(
+                "subscription"
+            )
+
+            customer_id = session_data.get(
+                "customer"
+            )
+
+            if (
+                user_id
+                and plan
+                and subscription_id
+            ):
+                activate_subscription(
+                    user_id=user_id,
+                    plan=plan,
+                    stripe_customer_id=customer_id,
+                    stripe_subscription_id=subscription_id,
+                )
+
+            return {
+                "received": True,
+            }
+
         report_id = (
             metadata.get(
                 "report_id"
@@ -759,6 +852,49 @@ async def stripe_webhook(
                     "email"
                 ),
             )
+
+    if event_type in {
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    }:
+        data = event_data.get(
+            "data"
+        ) or {}
+
+        stripe_subscription = _stripe_object_to_dict(
+            data.get(
+                "object"
+            )
+        )
+
+        subscription_id = stripe_subscription.get(
+            "id"
+        )
+
+        stripe_status = stripe_subscription.get(
+            "status"
+        )
+
+        if subscription_id:
+            if (
+                event_type
+                == "customer.subscription.deleted"
+            ):
+                deactivate_subscription(
+                    stripe_subscription_id=subscription_id,
+                    status="canceled",
+                )
+
+            elif stripe_status in {
+                "past_due",
+                "unpaid",
+                "canceled",
+                "incomplete_expired",
+            }:
+                deactivate_subscription(
+                    stripe_subscription_id=subscription_id,
+                    status=stripe_status,
+                )
 
     return {
         "received": True,
@@ -1005,10 +1141,29 @@ def add_monitored_site(
             detail="Website URL is required.",
         )
 
+    plan_access = can_add_monitored_site(owner_id)
+
+    if not plan_access["allowed"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "SITE_LIMIT_REACHED",
+                "message": (
+                    f"{plan_access['plan'].title()} plan allows "
+                    f"up to {plan_access['max_sites']} monitored site(s). "
+                    "Upgrade your plan to monitor more websites."
+                ),
+                "plan": plan_access["plan"],
+                "current_sites": plan_access["current_sites"],
+                "max_sites": plan_access["max_sites"],
+            },
+        )
+
     site = create_monitored_site(
         website_url=website_url,
         owner_id=owner_id,
         website_title=website_title,
+        scan_frequency=plan_access["scan_frequency"],
     )
 
     return {
@@ -1137,6 +1292,25 @@ async def scan_monitored_site(
             detail="Monitored site not found.",
         )
 
+    scan_access = can_run_manual_scan(owner_id)
+
+    if not scan_access["allowed"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "MANUAL_SCAN_LIMIT_REACHED",
+                "message": (
+                    f"{scan_access['plan'].title()} plan allows "
+                    f"{scan_access['limit']} manual scans per month. "
+                    "Upgrade your plan for more scans."
+                ),
+                "plan": scan_access["plan"],
+                "used": scan_access["used"],
+                "limit": scan_access["limit"],
+                "remaining": scan_access["remaining"],
+            },
+        )
+
     try:
         result = await run_monitoring_scan(
             site_id
@@ -1158,6 +1332,8 @@ async def scan_monitored_site(
                 "Monitoring scan failed.",
             ),
         )
+
+    record_manual_scan(owner_id)
 
     return result
 
@@ -1341,3 +1517,30 @@ async def run_scheduled_monitoring(
         )
 
     return await run_due_monitoring_scans()
+
+
+# =================================
+# SUBSCRIPTION / PLAN
+# =================================
+
+@app.get("/account/plan")
+def get_account_plan(
+    request: Request,
+):
+    owner_id = _require_clerk_user(request)
+
+    from services.plan_service import get_user_plan_summary
+
+    summary = get_user_plan_summary(owner_id)
+    sites = list_monitored_sites(owner_id)
+
+    summary["usage"]["monitored_sites"] = len(sites)
+    summary["usage"]["sites_remaining"] = max(
+        summary["limits"]["max_sites"] - len(sites),
+        0,
+    )
+
+    return {
+        "success": True,
+        **summary,
+    }

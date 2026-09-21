@@ -65,6 +65,46 @@ function App() {
     );
   };
 
+  const startSubscriptionCheckout = async (plan) => {
+    try {
+      const response = await authenticatedFetch(
+        `/account/subscription/checkout?plan=${encodeURIComponent(plan)}`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Unable to start subscription checkout."
+        );
+      }
+
+      if (!data?.checkout_url) {
+        throw new Error(
+          "Stripe checkout URL was not returned."
+        );
+      }
+
+      window.location.href = data.checkout_url;
+    } catch (error) {
+      console.error(
+        "Unable to start subscription checkout:",
+        error
+      );
+
+      window.alert(
+        error?.message ||
+          "Unable to start subscription checkout."
+      );
+    }
+  };
+
   const createMonitoredSite = async (
     websiteUrl,
     websiteTitle = null
@@ -177,6 +217,7 @@ function App() {
   const [monitorScanMessage, setMonitorScanMessage] = useState("");
   const [newMonitoringUrl, setNewMonitoringUrl] = useState("");
   const [addingMonitoringSite, setAddingMonitoringSite] = useState(false);
+  const [accountPlan, setAccountPlan] = useState(null);
 
   useEffect(() => {
     if (!isDashboardPage || !isSignedIn) {
@@ -185,6 +226,28 @@ function App() {
 
     setDashboardLoading(true);
     setDashboardError("");
+
+    authenticatedFetch("/account/plan")
+      .then(async (response) => {
+        const data = await response
+          .json()
+          .catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(
+            data?.detail ||
+              "Unable to load account plan."
+          );
+        }
+
+        setAccountPlan(data);
+      })
+      .catch((error) => {
+        console.error(
+          "Unable to load account plan:",
+          error
+        );
+      });
 
     authenticatedFetch("/monitoring/sites")
       .then(async (response) => {
@@ -862,6 +925,31 @@ function App() {
   const activeReport = fullReport || result;
   const aiAnalysis = fullReport?.ai_analysis || null;
 
+  useEffect(() => {
+    if (isDashboardPage || activeLegalPage) {
+      return;
+    }
+
+    const sectionId = window.location.hash.replace("#", "");
+
+    if (!sectionId) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById(sectionId);
+
+      if (target) {
+        target.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
+    }, 100);
+
+    return () => window.clearTimeout(timer);
+  }, [isDashboardPage, activeLegalPage]);
+
   const navigateToSection = (sectionId) => {
     const scrollToTarget = () => {
       const target = document.getElementById(sectionId);
@@ -1296,6 +1384,71 @@ function App() {
                       Monitor website health, recurring scans,
                       and revenue leak issues from one place.
                     </p>
+
+                    {accountPlan && (
+                      <div className="dashboard-plan-card">
+                        <div className="dashboard-plan-heading">
+                          <div>
+                            <span className="section-label">
+                              CURRENT PLAN
+                            </span>
+                            <h2>
+                              {accountPlan.name} Plan
+                            </h2>
+                          </div>
+
+                          <strong className="dashboard-plan-price">
+                            ${accountPlan.price_monthly}
+                            <span>/mo</span>
+                          </strong>
+                        </div>
+
+                        <div className="dashboard-plan-usage">
+                          <div>
+                            <strong>
+                              {accountPlan.usage.monitored_sites}/
+                              {accountPlan.limits.max_sites}
+                            </strong>
+                            <span>Websites</span>
+                          </div>
+
+                          <div>
+                            <strong>
+                              {accountPlan.usage.manual_scans}/
+                              {accountPlan.limits.manual_scans_per_month}
+                            </strong>
+                            <span>Manual scans</span>
+                          </div>
+
+                          <div>
+                            <strong>
+                              {accountPlan.limits.scan_frequency}
+                            </strong>
+                            <span>Monitoring</span>
+                          </div>
+
+                          <div>
+                            <strong>
+                              {accountPlan.limits.history_days} days
+                            </strong>
+                            <span>History</span>
+                          </div>
+                        </div>
+
+                        {accountPlan.plan === "free" && (
+                          <button
+                            className="pricing-button primary-pricing dashboard-upgrade-button"
+                            type="button"
+                            onClick={() => {
+                              window.location.href = "/#pricing";
+                            }}
+                          >
+                            View Upgrade Plans
+                            <ArrowRight size={18} />
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <form
                       className="dashboard-add-site"
@@ -2003,18 +2156,16 @@ function App() {
               <div className="landing-container">
                 <div className="section-heading">
                   <span className="section-label">
-                    SIMPLE PRICING
+                    SIMPLE SAAS PRICING
                   </span>
 
                   <h2>
-                    Scan free. Unlock the complete report only
-                    when it is worth it.
+                    Keep revenue leaks from coming back.
                   </h2>
 
                   <p>
-                    No subscription and no recurring charge.
-                    The $29 payment applies to the full report
-                    for the website scan you choose to unlock.
+                    Start free, then upgrade as you add more
+                    websites, scans, monitoring, and AI analysis.
                   </p>
                 </div>
 
@@ -2022,107 +2173,209 @@ function App() {
                   <article className="pricing-card">
                     <div className="pricing-top">
                       <span className="pricing-name">
-                        FREE WEBSITE SCAN
+                        FREE
                       </span>
 
                       <div className="price">
                         <strong>$0</strong>
-                        <span>forever to scan</span>
+                        <span>/ month</span>
                       </div>
 
                       <p>
-                        See the core score and biggest visible
-                        problems before paying anything.
+                        For trying LeakLens on one website with
+                        lightweight ongoing monitoring.
                       </p>
                     </div>
 
                     <ul className="pricing-list">
                       <li>
                         <CheckCircle2 size={17} />
-                        Revenue Leak Score
+                        1 monitored website
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        SEO, conversion, and performance scores
+                        Weekly automatic monitoring
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Top detected issues
+                        3 manual scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Basic recommended fixes
+                        2 AI analyses per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        No signup required
+                        7-day issue history
                       </li>
                     </ul>
 
                     <button
                       className="pricing-button secondary-pricing"
                       type="button"
-                      onClick={() => navigateToSection("scan")}
+                      onClick={isSignedIn ? goDashboard : () => navigateToSection("scan")}
                     >
-                      Start Free Scan
+                      Start Free
                       <ArrowRight size={18} />
                     </button>
                   </article>
 
-                  <article className="pricing-card paid-pricing-card">
-                    <div className="pricing-badge">
-                      MOST COMPLETE
-                    </div>
-
+                  <article className="pricing-card">
                     <div className="pricing-top">
                       <span className="pricing-name">
-                        FULL REVENUE LEAK REPORT
+                        STARTER
                       </span>
 
                       <div className="price">
-                        <strong>$29</strong>
-                        <span>one-time</span>
+                        <strong>$5</strong>
+                        <span>/ month</span>
                       </div>
 
                       <p>
-                        Turn the scan into a complete technical
-                        and business-focused execution plan.
+                        For solo operators managing a few websites
+                        and needing daily leak detection.
                       </p>
                     </div>
 
                     <ul className="pricing-list">
                       <li>
                         <CheckCircle2 size={17} />
-                        Everything in the free scan
+                        3 monitored websites
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Every detected website issue
+                        Daily automatic monitoring
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        AI executive summary and business risks
+                        20 manual scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Prioritized fix recommendations
+                        10 AI analyses per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Quick wins and 30-day roadmap
+                        30-day issue history
+                      </li>
+                    </ul>
+
+                    <button
+                      className="pricing-button secondary-pricing"
+                      type="button"
+                      onClick={() =>
+                        startSubscriptionCheckout("starter")
+                      }
+                    >
+                      Choose Starter
+                      <ArrowRight size={18} />
+                    </button>
+                  </article>
+
+                  <article className="pricing-card paid-pricing-card">
+                    <div className="pricing-badge">
+                      MOST POPULAR
+                    </div>
+
+                    <div className="pricing-top">
+                      <span className="pricing-name">
+                        GROWTH
+                      </span>
+
+                      <div className="price">
+                        <strong>$15</strong>
+                        <span>/ month</span>
+                      </div>
+
+                      <p>
+                        For growing businesses monitoring multiple
+                        revenue-generating websites.
+                      </p>
+                    </div>
+
+                    <ul className="pricing-list">
+                      <li>
+                        <CheckCircle2 size={17} />
+                        10 monitored websites
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        Downloadable branded PDF
+                        Daily automatic monitoring
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        100 manual scans per month
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        50 AI analyses per month
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        90-day issue history
                       </li>
                     </ul>
 
                     <button
                       className="pricing-button primary-pricing"
                       type="button"
-                      onClick={() => navigateToSection("scan")}
+                      onClick={() =>
+                        startSubscriptionCheckout("growth")
+                      }
                     >
-                      Scan & Unlock for $29
+                      Choose Growth
+                      <ArrowRight size={18} />
+                    </button>
+                  </article>
+
+                  <article className="pricing-card">
+                    <div className="pricing-top">
+                      <span className="pricing-name">
+                        PRO
+                      </span>
+
+                      <div className="price">
+                        <strong>$29</strong>
+                        <span>/ month</span>
+                      </div>
+
+                      <p>
+                        For agencies and teams managing larger
+                        website portfolios.
+                      </p>
+                    </div>
+
+                    <ul className="pricing-list">
+                      <li>
+                        <CheckCircle2 size={17} />
+                        25 monitored websites
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        Daily automatic monitoring
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        300 manual scans per month
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        150 AI analyses per month
+                      </li>
+                      <li>
+                        <CheckCircle2 size={17} />
+                        1-year issue history
+                      </li>
+                    </ul>
+
+                    <button
+                      className="pricing-button secondary-pricing"
+                      type="button"
+                      onClick={() =>
+                        startSubscriptionCheckout("pro")
+                      }
+                    >
+                      Choose Pro
                       <ArrowRight size={18} />
                     </button>
                   </article>
@@ -2131,9 +2384,9 @@ function App() {
                 <div className="pricing-assurance">
                   <ShieldCheck size={19} />
                   <span>
-                    Your free scan does not require payment.
-                    Checkout only begins when you explicitly choose
-                    to unlock the full report.
+                    Start on Free with no recurring charge.
+                    Upgrade only when you need more websites,
+                    scans, history, or AI analysis.
                   </span>
                 </div>
               </div>
