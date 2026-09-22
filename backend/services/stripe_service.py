@@ -126,15 +126,6 @@ def create_checkout_session(
 
     _configure_stripe()
 
-    price_id = os.getenv(
-        plan_config["price_env"]
-    )
-
-    if not price_id:
-        raise RuntimeError(
-            f'{plan_config["price_env"]} is not configured.'
-        )
-
     frontend_url = _get_frontend_url()
 
     success_url = (
