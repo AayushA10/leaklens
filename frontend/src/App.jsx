@@ -1628,7 +1628,7 @@ function App() {
                               {accountPlan.usage.manual_scans}/
                               {accountPlan.limits.manual_scans_per_month}
                             </strong>
-                            <span>Manual scans</span>
+                            <span>Manual monitoring scans</span>
                           </div>
 
                           <div>
@@ -2426,7 +2426,7 @@ function App() {
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        3 manual scans per month
+                        3 manual monitoring scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
@@ -2476,7 +2476,7 @@ function App() {
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        20 manual scans per month
+                        20 manual monitoring scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
@@ -2532,7 +2532,7 @@ function App() {
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        100 manual scans per month
+                        100 manual monitoring scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
@@ -2584,7 +2584,7 @@ function App() {
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
-                        300 manual scans per month
+                        300 manual monitoring scans per month
                       </li>
                       <li>
                         <CheckCircle2 size={17} />
