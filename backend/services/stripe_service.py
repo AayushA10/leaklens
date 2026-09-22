@@ -355,6 +355,15 @@ def create_subscription_checkout_session(
             "Invalid subscription plan."
         )
 
+    price_id = os.getenv(
+        plan_config["price_env"]
+    )
+
+    if not price_id:
+        raise RuntimeError(
+            f'{plan_config["price_env"]} is not configured.'
+        )
+
     frontend_url = _get_frontend_url()
 
     success_url = (
