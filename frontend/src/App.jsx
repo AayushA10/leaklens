@@ -138,6 +138,20 @@ function App() {
     }
   };
 
+  const getApiErrorMessage = (data, fallback) => {
+    const detail = data?.detail;
+
+    if (typeof detail === "string") {
+      return detail;
+    }
+
+    if (detail && typeof detail === "object") {
+      return detail.message || detail.detail || fallback;
+    }
+
+    return fallback;
+  };
+
   const createMonitoredSite = async (
     websiteUrl,
     websiteTitle = null
@@ -162,8 +176,10 @@ function App() {
 
     if (!response.ok) {
       throw new Error(
-        data?.detail ||
+        getApiErrorMessage(
+          data,
           "Unable to add website monitoring."
+        )
       );
     }
 
